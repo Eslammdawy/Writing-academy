@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
@@ -9,12 +9,13 @@ import {
 } from '../../../src/components/PlayfulUI';
 import { useAppState } from '../../../src/context/AppStateContext';
 import { getLettersByLanguage } from '../../../src/data/curriculum';
+import { useSafeNavigate } from '../../../src/hooks/useSafeNavigate';
 import { useTabletLayout } from '../../../src/hooks/useTabletLayout';
 import { COLORS, RADIUS, SHADOWS, SPACING } from '../../../src/theme/tokens';
 import { LanguageCode } from '../../../src/types';
 
 export default function LanguageHubScreen() {
-  const router = useRouter();
+  const nav = useSafeNavigate();
   const params = useLocalSearchParams<{ language: string }>();
   const language: LanguageCode = params.language === 'ar' ? 'ar' : 'en';
   const isAr = language === 'ar';
@@ -59,8 +60,8 @@ export default function LanguageHubScreen() {
         childName={activeChild.name}
         childAvatar={activeChild.avatar}
         starsCount={activeChild.starsCount}
-        onBack={() => router.push('/(child)/home')}
-        onHome={() => router.push('/(child)/home')}
+        onBack={() => nav.back()}
+        onHome={nav.goHome}
       />
 
       <MascotBanner
@@ -114,7 +115,7 @@ export default function LanguageHubScreen() {
           emoji="🎨"
           label={isAr ? 'ابدأ الدرس' : 'Start Lesson'}
           color={worldColor}
-          onPress={() => router.push(`/(child)/letter/${hubStats.recommended.id}`)}
+          onPress={() => nav.push(`/(child)/letter/${hubStats.recommended.id}`)}
         />
       </View>
 
@@ -123,7 +124,7 @@ export default function LanguageHubScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={isAr ? 'مستكشف الحروف' : 'Alphabet Explorer'}
-          onPress={() => router.push(`/(child)/alphabet/${language}`)}
+          onPress={() => nav.push(`/(child)/alphabet/${language}`)}
           style={[styles.hubFeatureCard, SHADOWS.card]}
         >
           <Text style={styles.featureEmoji}>{isAr ? 'أ ب ت' : '🔤'}</Text>
@@ -140,7 +141,7 @@ export default function LanguageHubScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={isAr ? 'تركيب الكلمات' : 'Word Builder'}
-          onPress={() => router.push(`/(child)/words/${language}`)}
+          onPress={() => nav.push(`/(child)/words/${language}`)}
           style={[styles.hubFeatureCard, SHADOWS.card]}
         >
           <Text style={styles.featureEmoji}>🧩</Text>
@@ -157,7 +158,7 @@ export default function LanguageHubScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={isAr ? 'ألعاب الحروف' : 'Letter Games'}
-          onPress={() => router.push(`/(child)/games?lang=${language}`)}
+          onPress={() => nav.push(`/(child)/games?lang=${language}`)}
           style={[styles.hubFeatureCard, SHADOWS.card]}
         >
           <Text style={styles.featureEmoji}>🚀</Text>

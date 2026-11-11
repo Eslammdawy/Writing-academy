@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AVATAR_CATALOG } from '../data/curriculum';
 import { useTabletLayout } from '../hooks/useTabletLayout';
 import { audioService } from '../services/audio/audioService';
+import { narrator } from '../services/audio/narrator';
 import { COLORS, RADIUS, SHADOWS, SPACING, TOUCH_TARGETS } from '../theme/tokens';
 import { AvatarId, LanguageCode, MasteryStatus } from '../types';
 
@@ -199,15 +200,25 @@ export const TopAdventureHeader: React.FC<{
         ) : null}
 
         {childName ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Active explorer ${childName}`}
-            onPress={onPressChildBadge}
-            style={[styles.childBadge, { backgroundColor: avatarDef.bgColor }]}
-          >
-            <Text style={styles.childBadgeEmoji}>{avatarDef.emoji}</Text>
-            <Text style={styles.childBadgeName}>{childName}</Text>
-          </Pressable>
+          onPressChildBadge ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Active explorer ${childName}`}
+              onPress={onPressChildBadge}
+              style={[styles.childBadge, { backgroundColor: avatarDef.bgColor }]}
+            >
+              <Text style={styles.childBadgeEmoji}>{avatarDef.emoji}</Text>
+              <Text style={styles.childBadgeName}>{childName}</Text>
+            </Pressable>
+          ) : (
+            <View
+              accessibilityLabel={`Active explorer ${childName}`}
+              style={[styles.childBadge, { backgroundColor: avatarDef.bgColor }]}
+            >
+              <Text style={styles.childBadgeEmoji}>{avatarDef.emoji}</Text>
+              <Text style={styles.childBadgeName}>{childName}</Text>
+            </View>
+          )
         ) : null}
 
         {rightElement}
@@ -281,12 +292,24 @@ export const MascotBanner: React.FC<{
   isRtl = false,
   onAudioReplay,
 }) => {
+  const handleReplay = () => {
+    audioService.playSoundEffect('tap');
+    if (onAudioReplay) {
+      onAudioReplay();
+    } else {
+      narrator.repeat();
+    }
+  };
+
   return (
-    <View
-      style={[
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Tap mascot to hear instructions again"
+      onPress={handleReplay}
+      style={({ pressed }) => [
         styles.mascotBanner,
         SHADOWS.card,
-        { backgroundColor: color },
+        { backgroundColor: color, opacity: pressed ? 0.92 : 1 },
         isRtl && styles.headerRowRtl,
       ]}
     >
@@ -297,17 +320,10 @@ export const MascotBanner: React.FC<{
         <Text style={[styles.mascotTitle, isRtl && styles.rtlText]}>{title}</Text>
         <Text style={[styles.mascotMessage, isRtl && styles.rtlText]}>{message}</Text>
       </View>
-      {onAudioReplay ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Listen to instruction"
-          onPress={onAudioReplay}
-          style={styles.speakerCircleBtn}
-        >
-          <Text style={{ fontSize: 24 }}>🔊</Text>
-        </Pressable>
-      ) : null}
-    </View>
+      <View style={styles.speakerCircleBtn}>
+        <Text style={{ fontSize: 24 }}>🔊</Text>
+      </View>
+    </Pressable>
   );
 };
 

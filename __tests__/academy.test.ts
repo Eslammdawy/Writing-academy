@@ -24,6 +24,9 @@ import {
   hashParentPin,
   verifyParentPin,
 } from '../src/utils/pinSecurity';
+import { formatNarrationLine } from '../src/data/narration';
+import { VoiceNarrator } from '../src/services/audio/narrator';
+import { getLocalDateString, isSameLocalDay } from '../src/utils/dateUtils';
 
 describe('1. Curriculum Integrity (English A-Z & Arabic 28 Letters)', () => {
   test('contains exactly 26 unique English letters and 28 unique Arabic letters (54 total)', () => {
@@ -307,5 +310,77 @@ describe('3. Profiles, Mastery Progression, Rewards & Parent PIN Security', () =
     expect(await repo.verifyPin('1234')).toBe(false);
     const settings = await repo.getParentSettings();
     expect(settings.pinHash).toBe(hashParentPin('4321'));
+  });
+});
+
+describe('4. Voice-First Narrator Queue & Local Date Utilities (Phase 1)', () => {
+  test('narrator formats English and gender-neutral Arabic lines and queues without overlap', async () => {
+    const enWelcome = formatNarrationLine('home.welcome', 'en', { name: 'Soufy' });
+    const arWelcome = formatNarrationLine('home.welcome', 'ar', { name: 'Nadine' });
+    expect(enWelcome).toBe('Hi Soufy! Tap the big star to start.');
+    expect(arWelcome).toContain('Nadine');
+    expect(arWelcome).toContain('لنضغط');
+
+    const spokenLog: Array<{ text: string; lang?: string }> = [];
+    let stopCount = 0;
+    let pendingOnDone: (() => void) | null = null;
+
+    const testNarrator = new VoiceNarrator();
+    testNarrator.setSpeechDriverForTesting({
+      speak: (text, opts) => {
+        spokenLog.push({ text, lang: opts?.language });
+        pendingOnDone = opts?.onDone ?? null;
+      },
+      stop: () => {
+        stopCount += 1;
+      },
+      getAvailableVoicesAsync: async () => [
+        { language: 'en-US', identifier: 'en-us-x-sfg' },
+        { language: 'ar-SA', identifier: 'ar-sa-x-ard' },
+      ],
+    });
+
+    const health = await testNarrator.checkVoiceHealth();
+    expect(health.checked).toBe(true);
+    expect(health.enAvailable).toBe(true);
+    expect(health.arAvailable).toBe(true);
+
+    // Enqueue two lines and verify the second waits until the first completes (no overlap)
+    testNarrator.say('lesson.watch', undefined, { language: 'en', enqueue: true });
+    testNarrator.say('lesson.trace.start', undefined, { language: 'en', enqueue: true });
+
+    expect(spokenLog).toHaveLength(1);
+    expect(spokenLog[0].text).toBe('Watch how we write it.');
+    expect(testNarrator.getQueueLength()).toBe(2);
+
+    // Finish first utterance -> second starts automatically
+    if (pendingOnDone) (pendingOnDone as () => void)();
+    expect(spokenLog).toHaveLength(2);
+    expect(spokenLog[1].text).toBe('Your turn! Start at the star and follow the arrow.');
+    expect(stopCount).toBeGreaterThanOrEqual(2);
+
+    // Repeat replays the last spoken line
+    const repeated = testNarrator.repeat();
+    expect(repeated).toBe('Your turn! Start at the star and follow the arrow.');
+    testNarrator.stop();
+  });
+
+  test('narrator detects missing Arabic voice data cleanly', async () => {
+    const testNarrator = new VoiceNarrator();
+    testNarrator.setSpeechDriverForTesting({
+      speak: () => {},
+      stop: () => {},
+      getAvailableVoicesAsync: async () => [{ language: 'en-US' }],
+    });
+
+    const health = await testNarrator.checkVoiceHealth();
+    expect(health.enAvailable).toBe(true);
+    expect(health.arAvailable).toBe(false);
+  });
+
+  test('getLocalDateString and isSameLocalDay use local calendar date instead of UTC', () => {
+    const localRef = new Date(2026, 10, 11, 23, 30, 0); // Nov 11, 2026 23:30 local
+    expect(getLocalDateString(localRef)).toBe('2026-11-11');
+    expect(isSameLocalDay(localRef.toISOString(), localRef)).toBe(true);
   });
 });

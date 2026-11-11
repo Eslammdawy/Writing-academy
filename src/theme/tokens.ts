@@ -71,9 +71,9 @@ export const RADIUS = {
 } as const;
 
 export const TOUCH_TARGETS = {
-  minChildButtonHeight: 64,
-  largeTabletButtonHeight: 72,
-  minIconHitSlop: 12,
+  minChildButtonHeight: 72,
+  largeTabletButtonHeight: 76,
+  minIconHitSlop: 16,
 } as const;
 
 export const SHADOWS = {

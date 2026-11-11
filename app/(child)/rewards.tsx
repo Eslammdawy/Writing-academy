@@ -1,4 +1,3 @@
-import { useRouter } from 'expo-router';
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import {
@@ -8,10 +7,11 @@ import {
 } from '../../src/components/PlayfulUI';
 import { useAppState } from '../../src/context/AppStateContext';
 import { BADGE_CATALOG } from '../../src/data/curriculum';
+import { useSafeNavigate } from '../../src/hooks/useSafeNavigate';
 import { COLORS, RADIUS, SHADOWS, SPACING } from '../../src/theme/tokens';
 
 export default function RewardsStickerGalleryScreen() {
-  const router = useRouter();
+  const nav = useSafeNavigate();
   const { activeChild, achievements } = useAppState();
 
   const unlockedTypes = new Set(achievements.map((a) => a.achievementType));
@@ -24,8 +24,8 @@ export default function RewardsStickerGalleryScreen() {
         childName={activeChild.name}
         childAvatar={activeChild.avatar}
         starsCount={activeChild.starsCount}
-        onBack={() => router.back()}
-        onHome={() => router.push('/(child)/home')}
+        onBack={() => nav.back()}
+        onHome={nav.goHome}
       />
 
       <MascotBanner

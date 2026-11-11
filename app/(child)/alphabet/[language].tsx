@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
@@ -8,6 +8,7 @@ import {
 } from '../../../src/components/PlayfulUI';
 import { useAppState } from '../../../src/context/AppStateContext';
 import { getLettersByLanguage } from '../../../src/data/curriculum';
+import { useSafeNavigate } from '../../../src/hooks/useSafeNavigate';
 import { useTabletLayout } from '../../../src/hooks/useTabletLayout';
 import { audioService } from '../../../src/services/audio/audioService';
 import { COLORS, RADIUS, SHADOWS, SPACING } from '../../../src/theme/tokens';
@@ -16,7 +17,7 @@ import { LanguageCode } from '../../../src/types';
 type ChildFilter = 'all' | 'learned' | 'practice_again';
 
 export default function AlphabetExplorerScreen() {
-  const router = useRouter();
+  const nav = useSafeNavigate();
   const params = useLocalSearchParams<{ language: string }>();
   const language: LanguageCode = params.language === 'ar' ? 'ar' : 'en';
   const isAr = language === 'ar';
@@ -57,8 +58,8 @@ export default function AlphabetExplorerScreen() {
         childName={activeChild.name}
         childAvatar={activeChild.avatar}
         starsCount={activeChild.starsCount}
-        onBack={() => router.push(`/(child)/language/${language}`)}
-        onHome={() => router.push('/(child)/home')}
+        onBack={() => nav.back(`/(child)/language/${language}`)}
+        onHome={nav.goHome}
       />
 
       {/* Simple Child-Friendly Filter Pills */}
@@ -134,7 +135,7 @@ export default function AlphabetExplorerScreen() {
                 accessibilityLabel={`${letter.nameEn} ${letter.example.word}`}
                 onPress={() => {
                   audioService.pronounceLetter(letter);
-                  router.push(`/(child)/letter/${letter.id}`);
+                  nav.push(`/(child)/letter/${letter.id}`);
                 }}
                 style={({ pressed }) => [
                   styles.letterTile,

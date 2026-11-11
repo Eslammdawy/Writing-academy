@@ -5,6 +5,7 @@ module.exports = {
   roots: ['<rootDir>/src', '<rootDir>/__tests__'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
+    '\\.(wav|mp3|ttf|png|jpg)$': '<rootDir>/__mocks__/fileMock.js',
   },
   transform: {
     '^.+\\.tsx?$': [

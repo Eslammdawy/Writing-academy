@@ -1,4 +1,3 @@
-import { useRouter } from 'expo-router';
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
@@ -9,12 +8,14 @@ import {
 } from '../../src/components/PlayfulUI';
 import { useAppState } from '../../src/context/AppStateContext';
 import { ALL_LETTERS } from '../../src/data/curriculum';
+import { useSafeNavigate } from '../../src/hooks/useSafeNavigate';
 import { useTabletLayout } from '../../src/hooks/useTabletLayout';
 import { audioService } from '../../src/services/audio/audioService';
 import { COLORS, RADIUS, SHADOWS, SPACING } from '../../src/theme/tokens';
+import { isSameLocalDay } from '../../src/utils/dateUtils';
 
 export default function ChildHomeAdventureScreen() {
-  const router = useRouter();
+  const nav = useSafeNavigate();
   const { isLandscape } = useTabletLayout();
   const { activeChild, progressMap, parentSettings, achievements } = useAppState();
 
@@ -27,10 +28,7 @@ export default function ChildHomeAdventureScreen() {
       (r) => r.letterId.startsWith('ar_') && r.attempts > 0
     ).length;
 
-    const todayPrefix = new Date().toISOString().slice(0, 10);
-    const practicedToday = records.filter(
-      (r) => r.lastPracticed && r.lastPracticed.startsWith(todayPrefix)
-    ).length;
+    const practicedToday = records.filter((r) => isSameLocalDay(r.lastPracticed)).length;
 
     // Pick next recommended letter for "Continue Learning"
     const nextLetter =
@@ -63,7 +61,7 @@ export default function ChildHomeAdventureScreen() {
         childName={activeChild.name}
         childAvatar={activeChild.avatar}
         starsCount={activeChild.starsCount}
-        onPressChildBadge={() => router.push('/(child)/profiles')}
+        onPressChildBadge={() => nav.push('/(child)/profiles')}
       />
 
       <MascotBanner
@@ -81,7 +79,7 @@ export default function ChildHomeAdventureScreen() {
           accessibilityLabel="English ABC Adventure"
           onPress={() => {
             audioService.playSoundEffect('sparkle');
-            router.push('/(child)/language/en');
+            nav.push('/(child)/language/en');
           }}
           style={[styles.worldCard, SHADOWS.card, styles.englishCard]}
         >
@@ -112,7 +110,7 @@ export default function ChildHomeAdventureScreen() {
           accessibilityLabel="Arabic Alphabet Adventure مغامرة الحروف العربية"
           onPress={() => {
             audioService.playSoundEffect('sparkle');
-            router.push('/(child)/language/ar');
+            nav.push('/(child)/language/ar');
           }}
           style={[styles.worldCard, SHADOWS.card, styles.arabicCard]}
         >
@@ -161,7 +159,7 @@ export default function ChildHomeAdventureScreen() {
             label="Practice Now"
             sublabel="تدرّب الآن"
             color={COLORS.coralOrange}
-            onPress={() => router.push(`/(child)/letter/${stats.nextLetter.id}`)}
+            onPress={() => nav.push(`/(child)/letter/${stats.nextLetter.id}`)}
           />
         </View>
       </View>
@@ -173,7 +171,7 @@ export default function ChildHomeAdventureScreen() {
           label="Play a Game"
           sublabel="العب وتعلّم (5 ألعاب)"
           color={COLORS.lavenderPurple}
-          onPress={() => router.push('/(child)/games')}
+          onPress={() => nav.push('/(child)/games')}
           style={styles.bottomGridBtn}
         />
 
@@ -182,7 +180,7 @@ export default function ChildHomeAdventureScreen() {
           label="Word Builder"
           sublabel="ركّب الكلمات"
           color={COLORS.skyBlue}
-          onPress={() => router.push('/(child)/words/en')}
+          onPress={() => nav.push('/(child)/words/en')}
           style={styles.bottomGridBtn}
         />
 
@@ -191,7 +189,7 @@ export default function ChildHomeAdventureScreen() {
           label={`My Rewards (${achievements.length})`}
           sublabel="نجومي وملصقاتي"
           color={COLORS.sunshineYellowDark}
-          onPress={() => router.push('/(child)/rewards')}
+          onPress={() => nav.push('/(child)/rewards')}
           style={styles.bottomGridBtn}
         />
 
@@ -200,7 +198,7 @@ export default function ChildHomeAdventureScreen() {
           label="My Journey"
           sublabel="رحلة تقدمي"
           color={COLORS.mintGreenDark}
-          onPress={() => router.push('/(child)/progress')}
+          onPress={() => nav.push('/(child)/progress')}
           style={styles.bottomGridBtn}
         />
       </View>

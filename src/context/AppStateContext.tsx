@@ -5,6 +5,7 @@ import {
   RecordPracticeInput,
 } from '../database/repository';
 import { audioService } from '../services/audio/audioService';
+import { narrator, VoiceHealthStatus } from '../services/audio/narrator';
 import {
   AchievementRecord,
   AchievementType,
@@ -35,6 +36,8 @@ export interface AppStateContextValue {
   sessions: PracticeSessionRecord[];
   parentSettings: ParentSettingsRecord;
   isParentAuthenticated: boolean;
+  voiceHealth: VoiceHealthStatus;
+  recheckVoiceHealth: () => Promise<VoiceHealthStatus>;
   selectChild: (childId: string) => Promise<void>;
   updateChild: (
     childId: string,
@@ -100,6 +103,13 @@ export const AppStateProvider: React.FC<{
   const [sessions, setSessions] = useState<PracticeSessionRecord[]>([]);
   const [parentSettings, setParentSettings] = useState<ParentSettingsRecord>(FALLBACK_SETTINGS);
   const [isParentAuthenticated, setIsParentAuthenticated] = useState(false);
+  const [voiceHealth, setVoiceHealth] = useState<VoiceHealthStatus>(narrator.getVoiceHealth());
+
+  const recheckVoiceHealth = useCallback(async () => {
+    const status = await narrator.checkVoiceHealth();
+    setVoiceHealth(status);
+    return status;
+  }, []);
 
   const loadChildIsolatedData = useCallback(
     async (childId: string) => {
@@ -133,6 +143,8 @@ export const AppStateProvider: React.FC<{
         narrationEnabled: settings.narrationEnabled,
         soundEffectsVolume: settings.soundEffectsVolume,
       });
+      const vHealth = await narrator.checkVoiceHealth();
+      if (mounted) setVoiceHealth(vHealth);
       await loadChildIsolatedData(firstChild.id);
       if (mounted) setIsReady(true);
     })();
@@ -303,6 +315,8 @@ export const AppStateProvider: React.FC<{
         sessions,
         parentSettings,
         isParentAuthenticated,
+        voiceHealth,
+        recheckVoiceHealth,
         selectChild,
         updateChild,
         addChild,

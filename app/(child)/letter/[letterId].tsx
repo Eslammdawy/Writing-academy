@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
@@ -9,6 +9,7 @@ import {
 } from '../../../src/components/PlayfulUI';
 import { useAppState } from '../../../src/context/AppStateContext';
 import { getLetterById, getNextLetter } from '../../../src/data/curriculum';
+import { useSafeNavigate } from '../../../src/hooks/useSafeNavigate';
 import { useTabletLayout } from '../../../src/hooks/useTabletLayout';
 import { audioService } from '../../../src/services/audio/audioService';
 import { COLORS, RADIUS, SHADOWS, SPACING } from '../../../src/theme/tokens';
@@ -20,7 +21,7 @@ import {
 } from '../../../src/types';
 
 export default function LetterDiscoveryLessonScreen() {
-  const router = useRouter();
+  const nav = useSafeNavigate();
   const params = useLocalSearchParams<{ letterId: string }>();
   const letter = getLetterById(params.letterId ?? 'en_A') ?? getLetterById('en_A')!;
   const isAr = letter.language === 'ar';
@@ -68,8 +69,8 @@ export default function LetterDiscoveryLessonScreen() {
         childName={activeChild.name}
         childAvatar={activeChild.avatar}
         starsCount={activeChild.starsCount}
-        onBack={() => router.push(`/(child)/alphabet/${letter.language}`)}
-        onHome={() => router.push('/(child)/home')}
+        onBack={() => nav.back(`/(child)/alphabet/${letter.language}`)}
+        onHome={nav.goHome}
       />
 
       <View style={[styles.mainRow, isLandscape && styles.mainRowLandscape]}>
@@ -292,7 +293,7 @@ export default function LetterDiscoveryLessonScreen() {
               sublabel={isAr ? 'شاهد الرسم' : 'See strokes'}
               color={COLORS.lavenderPurple}
               onPress={() =>
-                router.push(
+                nav.push(
                   `/(child)/practice/${letter.id}?mode=watch&form=${selectedForm}`
                 )
               }
@@ -305,7 +306,7 @@ export default function LetterDiscoveryLessonScreen() {
               sublabel={isAr ? 'تتبّع النقاط' : 'Follow dots'}
               color={COLORS.skyBlue}
               onPress={() =>
-                router.push(
+                nav.push(
                   `/(child)/practice/${letter.id}?mode=trace&form=${selectedForm}`
                 )
               }
@@ -318,7 +319,7 @@ export default function LetterDiscoveryLessonScreen() {
               sublabel={isAr ? 'اكتب بمفردك' : 'Write solo'}
               color={COLORS.mintGreen}
               onPress={() =>
-                router.push(
+                nav.push(
                   `/(child)/practice/${letter.id}?mode=write&form=${selectedForm}`
                 )
               }
@@ -336,7 +337,7 @@ export default function LetterDiscoveryLessonScreen() {
             color={COLORS.textSecondary}
             variant="outline"
             minHeight={56}
-            onPress={() => router.push(`/(child)/letter/${nextLetter.id}`)}
+            onPress={() => nav.replace(`/(child)/letter/${nextLetter.id}`)}
           />
         </View>
       </View>

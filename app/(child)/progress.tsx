@@ -1,4 +1,3 @@
-import { useRouter } from 'expo-router';
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
@@ -9,18 +8,19 @@ import {
 } from '../../src/components/PlayfulUI';
 import { useAppState } from '../../src/context/AppStateContext';
 import { ARABIC_LETTERS, ENGLISH_LETTERS } from '../../src/data/curriculum';
+import { useSafeNavigate } from '../../src/hooks/useSafeNavigate';
 import { useTabletLayout } from '../../src/hooks/useTabletLayout';
 import { COLORS, RADIUS, SHADOWS, SPACING } from '../../src/theme/tokens';
+import { isSameLocalDay } from '../../src/utils/dateUtils';
 
 export default function ChildProgressJourneyScreen() {
-  const router = useRouter();
+  const nav = useSafeNavigate();
   const { isLandscape } = useTabletLayout();
   const { activeChild, progressMap, sessions } = useAppState();
 
   const summary = useMemo(() => {
-    const todayPrefix = new Date().toISOString().slice(0, 10);
     const todaySeconds = sessions
-      .filter((s) => s.sessionDate.startsWith(todayPrefix))
+      .filter((s) => isSameLocalDay(s.sessionDate))
       .reduce((acc, s) => acc + s.durationSeconds, 0);
     const todayMinutes = Math.max(
       todaySeconds > 0 ? 1 : 0,
@@ -57,8 +57,8 @@ export default function ChildProgressJourneyScreen() {
         childName={activeChild.name}
         childAvatar={activeChild.avatar}
         starsCount={activeChild.starsCount}
-        onBack={() => router.back()}
-        onHome={() => router.push('/(child)/home')}
+        onBack={() => nav.back()}
+        onHome={nav.goHome}
       />
 
       <MascotBanner
@@ -81,7 +81,7 @@ export default function ChildProgressJourneyScreen() {
               return (
                 <Pressable
                   key={l.id}
-                  onPress={() => router.push(`/(child)/letter/${l.id}`)}
+                  onPress={() => nav.push(`/(child)/letter/${l.id}`)}
                   style={[
                     styles.miniBubble,
                     practiced && {
@@ -116,7 +116,7 @@ export default function ChildProgressJourneyScreen() {
               return (
                 <Pressable
                   key={l.id}
-                  onPress={() => router.push(`/(child)/letter/${l.id}`)}
+                  onPress={() => nav.push(`/(child)/letter/${l.id}`)}
                   style={[
                     styles.miniBubble,
                     practiced && {
@@ -150,7 +150,7 @@ export default function ChildProgressJourneyScreen() {
             {summary.revisitList.map((l) => (
               <Pressable
                 key={l.id}
-                onPress={() => router.push(`/(child)/letter/${l.id}`)}
+                onPress={() => nav.push(`/(child)/letter/${l.id}`)}
                 style={styles.revisitTile}
               >
                 <Text style={styles.revisitChar}>{l.character}</Text>

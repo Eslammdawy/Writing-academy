@@ -1,5 +1,5 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useMemo, useRef, useState } from 'react';
+import { useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   PlayfulButton,
@@ -9,8 +9,10 @@ import {
 import { useAppState } from '../../../src/context/AppStateContext';
 import { BADGE_CATALOG, getLetterById, getNextLetter } from '../../../src/data/curriculum';
 import { HandwritingCanvas } from '../../../src/features/handwriting/HandwritingCanvas';
+import { useSafeNavigate } from '../../../src/hooks/useSafeNavigate';
 import { useTabletLayout } from '../../../src/hooks/useTabletLayout';
 import { audioService } from '../../../src/services/audio/audioService';
+import { narrator } from '../../../src/services/audio/narrator';
 import {
   evaluateHandwritingAttempt,
   SCORING_VERSION,
@@ -27,7 +29,7 @@ import {
 } from '../../../src/types';
 
 export default function HandwritingStudioScreen() {
-  const router = useRouter();
+  const nav = useSafeNavigate();
   const params = useLocalSearchParams<{
     letterId: string;
     mode?: string;
@@ -37,7 +39,7 @@ export default function HandwritingStudioScreen() {
   const letter = getLetterById(params.letterId ?? 'en_A') ?? getLetterById('en_A')!;
   const isAr = letter.language === 'ar';
   const { isLandscape, canvasSize } = useTabletLayout();
-  const { activeChild, recordPractice, parentSettings, updateSettings } = useAppState();
+  const { activeChild, recordPractice } = useAppState();
 
   const initialMode: HandwritingMode =
     params.mode === 'watch' || params.mode === 'write' ? params.mode : 'trace';
@@ -111,6 +113,31 @@ export default function HandwritingStudioScreen() {
     setWatchReplayCounter((c) => c + 1);
   };
 
+  // Fixes P4: Wire Watch -> Trace handoff automatically when demo finishes
+  const handleWatchComplete = useCallback(() => {
+    narrator.say('lesson.trace.start', undefined, {
+      language: activeChild.preferredLanguage,
+    });
+    setMode('trace');
+    setRecordedStrokes([]);
+    setEvaluationResult(null);
+    sessionStartRef.current = Date.now();
+  }, [activeChild.preferredLanguage]);
+
+  useEffect(() => {
+    if (mode === 'watch') {
+      narrator.say('lesson.watch', undefined, { language: activeChild.preferredLanguage });
+    } else if (mode === 'trace') {
+      narrator.say('lesson.trace.start', undefined, {
+        language: activeChild.preferredLanguage,
+      });
+    } else {
+      narrator.say('lesson.write.start', undefined, {
+        language: activeChild.preferredLanguage,
+      });
+    }
+  }, [mode, activeChild.preferredLanguage]);
+
   const handleEvaluateAttempt = async () => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
@@ -162,6 +189,7 @@ export default function HandwritingStudioScreen() {
 
   return (
     <ScreenContainer
+      scroll={false}
       backgroundColor={isAr ? COLORS.arabicWorldBg : COLORS.englishWorldBg}
     >
       <TopAdventureHeader
@@ -183,22 +211,8 @@ export default function HandwritingStudioScreen() {
         childName={activeChild.name}
         childAvatar={activeChild.avatar}
         starsCount={activeChild.starsCount}
-        onBack={() => router.push(`/(child)/letter/${letter.id}`)}
-        onHome={() => router.push('/(child)/home')}
-        rightElement={
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Toggle Sound"
-            onPress={() =>
-              updateSettings({ audioEnabled: !parentSettings.audioEnabled })
-            }
-            style={styles.audioToggleBtn}
-          >
-            <Text style={{ fontSize: 22 }}>
-              {parentSettings.audioEnabled ? '🔊' : '🔇'}
-            </Text>
-          </Pressable>
-        }
+        onBack={() => nav.back(`/(child)/letter/${letter.id}`)}
+        onHome={nav.goHome}
       />
 
       <View style={[styles.studioBody, isLandscape && styles.studioBodyLandscape]}>
@@ -212,6 +226,7 @@ export default function HandwritingStudioScreen() {
             onStrokesChange={setRecordedStrokes}
             canvasSize={canvasSize}
             watchTriggerKey={watchReplayCounter}
+            onWatchComplete={handleWatchComplete}
           />
 
           {/* Bottom Canvas Action Row: Undo, Clear, Replay Guide, Check / Next */}
@@ -474,39 +489,71 @@ export default function HandwritingStudioScreen() {
               ) : null}
 
               <View style={styles.resultButtonsRow}>
-                <PlayfulButton
-                  emoji="🔄"
-                  label={isAr ? 'حاول مرة أخرى' : 'Try Again'}
-                  color={COLORS.skyBlue}
-                  variant="outline"
-                  onPress={() => {
-                    setRetryCount((r) => r + 1);
-                    setRecordedStrokes([]);
-                    setEvaluationResult(null);
-                    sessionStartRef.current = Date.now();
-                  }}
-                  style={styles.resultBtn}
-                />
+                {evaluationResult.passed ? (
+                  <>
+                    <PlayfulButton
+                      emoji="🔄"
+                      label={isAr ? 'حاول مرة أخرى' : 'Try Again'}
+                      color={COLORS.skyBlue}
+                      variant="outline"
+                      onPress={() => {
+                        setRetryCount((r) => r + 1);
+                        setRecordedStrokes([]);
+                        setEvaluationResult(null);
+                        sessionStartRef.current = Date.now();
+                      }}
+                      style={styles.resultBtn}
+                    />
 
-                {mode === 'trace' && evaluationResult.passed ? (
-                  <PlayfulButton
-                    emoji="✏️"
-                    label={isAr ? 'اكتب بمفردك الآن!' : 'Try Write Solo!'}
-                    color={COLORS.mintGreen}
-                    onPress={() => handleSwitchMode('write')}
-                    style={styles.resultBtn}
-                  />
+                    {mode === 'trace' ? (
+                      <PlayfulButton
+                        emoji="✏️"
+                        label={isAr ? 'اكتب بمفردنا!' : 'Try Write Solo!'}
+                        color={COLORS.mintGreen}
+                        onPress={() => handleSwitchMode('write')}
+                        style={styles.resultBtn}
+                      />
+                    ) : (
+                      <PlayfulButton
+                        emoji="➡️"
+                        label={isAr ? 'الحرف التالي' : 'Next Letter'}
+                        color={COLORS.mintGreen}
+                        onPress={() => {
+                          setEvaluationResult(null);
+                          nav.replace(`/(child)/letter/${nextLetter.id}`);
+                        }}
+                        style={styles.resultBtn}
+                      />
+                    )}
+                  </>
                 ) : (
-                  <PlayfulButton
-                    emoji="➡️"
-                    label={isAr ? 'الحرف التالي' : 'Next Letter'}
-                    color={COLORS.mintGreen}
-                    onPress={() => {
-                      setEvaluationResult(null);
-                      router.replace(`/(child)/letter/${nextLetter.id}`);
-                    }}
-                    style={styles.resultBtn}
-                  />
+                  /* Fixes P6: A failed attempt never shows "Next Letter" as primary button */
+                  <>
+                    <PlayfulButton
+                      emoji="👀"
+                      label={isAr ? 'شاهد الشرح' : 'Show Me'}
+                      color={COLORS.lavenderPurple}
+                      variant="outline"
+                      onPress={() => {
+                        setEvaluationResult(null);
+                        handleReplayGuide();
+                      }}
+                      style={styles.resultBtn}
+                    />
+
+                    <PlayfulButton
+                      emoji="🔄"
+                      label={isAr ? 'لنحاول مرة أخرى' : 'Try Again'}
+                      color={COLORS.mintGreen}
+                      onPress={() => {
+                        setRetryCount((r) => r + 1);
+                        setRecordedStrokes([]);
+                        setEvaluationResult(null);
+                        sessionStartRef.current = Date.now();
+                      }}
+                      style={styles.resultBtn}
+                    />
+                  </>
                 )}
               </View>
             </View>
