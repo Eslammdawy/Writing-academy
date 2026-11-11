@@ -42,11 +42,15 @@ Because no physical Android tablet or local Android emulator (`adb`) is attached
 
 ---
 
-## 4. Previous Release Build Reference (`v1.0.0`)
+## 4. Updated Signed Android APK Build (`Independent Child Mode`)
 
 | Property | Value |
 |---|---|
 | **Android Application ID** | `com.soufyandnadine.handwriting` |
 | **EAS Project ID** | `d6e284e5-e6eb-4c17-ab4d-5318ca1997fd` (`@eslammdawys-team/soufy-and-nadine`) |
-| **Previous EAS Build ID** | `bfceba1d-aa30-4c01-af3f-8149a617b437` (`soufy-and-nadine-v1.0.0.apk`) |
-| **Note on Rebuilding APK** | Run `npx eas-cli build --platform android --profile preview` when ready to package the new Phase 1–6 independent-child-mode commits into a fresh downloadable `.apk`. |
+| **Latest EAS Build ID** | `ffe169af-827e-4597-ab67-69b008e1e437` (`status: FINISHED`, commit `4a49700`) |
+| **EAS Build Page URL** | https://expo.dev/accounts/eslammdawys-team/projects/soufy-and-nadine/builds/ffe169af-827e-4597-ab67-69b008e1e437 |
+| **Direct Cloud APK URL** | https://expo.dev/artifacts/eas/IKF8U9SJqgOh1l_Or8ZTrEZQsdwQL97Q1KxCcQn13K4.apk |
+| **Local APK File Path** | `d:\HPG\Project AI\Writing academy\soufy-and-nadine-v1.0.0.apk` |
+| **APK File Size** | `88.49 MB` (`92,785,103 bytes`) |
+| **APK SHA-256 Checksum** | `76FBD4F37210A8F8C609FC593984556A8FF5CF1DAADE391E7C34C5604B4C5DD0` |
