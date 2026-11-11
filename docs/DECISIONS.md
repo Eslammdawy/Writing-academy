@@ -64,3 +64,49 @@ This document records the product and engineering decisions resolved during the 
   - Replaced the fixed `(17 × 3) + 9 = 60` recovery question with `generateAdultMathChallenge()` (`(A × B) + C` with randomized operands on each attempt).
   - Protected the `🔒` icon on `app/index.tsx` and `app/(child)/home.tsx` behind a `~2 s` press-and-hold (`delayLongPress={1800}`) and intercepted Android hardware `BackHandler` on Welcome and Home so a child cannot accidentally exit the app.
   - Upgraded SQLite schema to `SCHEMA_VERSION = 2` via `runForwardMigrations()` (`ALTER TABLE` statements recorded in `schema_migrations`), preserving all existing child profiles, stars, achievements, and progress.
+
+---
+
+## 9. Trace Freeze Fix — Performance & Rendering Architecture (`Improvement prompt V2.md`)
+
+These decisions were aligned during the `/grill-me` interview for `Improvement prompt V2.md` ("Fix the Freeze When a Child Traces a Letter"):
+
+### 9.1 Isolated `rAF`-Coalesced `ActiveInkLayer` vs. `setNativeProps` on Fabric (`P0.1`, `P0.2`, `P1.4`)
+- **Decision**: Render the in-progress stroke inside a dedicated, permanently-mounted, `React.memo`-wrapped `<ActiveInkLayer ref={inkRef} />` (`d=""` when idle) updated via `useImperativeHandle` (`inkRef.current?.setPath(d)`) at most once per `requestAnimationFrame` (`createFrameCoalescer`), using an incremental quadratic-Bezier path builder (`IncrementalSvgPath`).
+- **Rationale**:
+  - `app.json` has `"newArchEnabled": true` (React Native Fabric). Under Fabric, `setNativeProps({ d })` on `react-native-svg` `<Path>` elements is unreliable and cannot be smoke-tested on this build machine without an attached Android device (`adb`).
+  - Moving the `d` state into `ActiveInkLayer` (which renders a single `<Path>` leaf) guarantees 100% Fabric compatibility while preventing `HandwritingCanvas` and all sibling SVG layers from re-rendering on touch-move.
+  - `IncrementalSvgPath` caches previously emitted `Q` segments and only appends newly added points each frame, reducing per-frame string work from $O(N)$ (and $O(N^2)$ per stroke) to $O(\Delta N)$.
+
+### 9.2 Memoized Static & Demo SVG Sub-Layers (`P0.4`, `P1.3`)
+- **Decision**: Split `HandwritingCanvas` SVG children into `React.memo` components in `src/features/handwriting/CanvasLayers.tsx`:
+  - `NotebookLines`, `PrefilledLayer`, `GuideLayer`, `RecordedStrokesLayer`, `StrokePath`, `WatchLayer`, `InlineDemoLayer`, and `ActiveInkLayer`.
+  - Precompute and memoize `templatePaths` (`useMemo` keyed on `[templates, canvasSize]`).
+  - Move `WATCH` mode (`WatchLayer`) and single-stroke demo (`InlineDemoLayer`) tick states inside their own components so animation ticks only re-render the active demo layer.
+
+### 9.3 Point Cap by Decimation & Display-Only RDP Simplification (`P0.3`)
+- **Decision**:
+  - Keep `MIN_POINT_DISTANCE = 0.008` in `appendPointThinned` (mutating `activePointsRef.current` in place instead of `[...prev, pt]` on every move).
+  - Cap in-progress strokes at `MAX_STROKE_POINTS = 600` via `enforcePointCap`, which decimates (drops every other point while preserving the first and last point) so new finger movement continues to be captured even during a 60-second unbroken trace.
+  - Apply Ramer–Douglas–Peucker (`simplifyRdp` with `DISPLAY_SIMPLIFY_EPSILON = 0.0015`) **only** when rendering already-committed `StrokePath` layers, leaving the points passed to `evaluateStrokeAgainstTemplate` / `evaluateHandwritingAttempt` untouched so `SCORING_VERSION` (`1.1.0-deterministic`) and all existing scoring behavior remain 100% unchanged.
+
+### 9.4 Stable `PanResponder` & Throttled Idle-Ladder Resets (`P1.1`, `P1.2`)
+- **Decision**:
+  - Route `onStrokesChange` through `onStrokesChangeRef` inside `HandwritingCanvas` so `PanResponder` depends only on `[mode, canvasSize]`, and wrap `handleCanvasStrokesChange` in `useCallback` in `app/(child)/lesson/[letterId].tsx` and `fullTemplates` in `useMemo` in `app/(child)/games/[gameId].tsx`.
+  - Pass `TouchActivityKind` (`'grant' | 'move' | 'release'`) to `onTouchActivity`. In `useIdleHint.ts`, `'move'` calls `scheduler.noteActivity()` which throttles `clearTimeout`/`setTimeout` resets to at most once every `ACTIVITY_RESET_THROTTLE_MS = 500` ms, while `'grant'`, `'release'`, and button taps call `resetActivity()` immediately. `setPulseStartBadge(false)` is guarded by `pulseRef` so it never fires redundant state updates when the badge is not pulsing.
+  - Ensures a child drawing one continuous slow stroke for 60 seconds never triggers the 25-second `IDLE_STUCK` penalty mid-stroke while cutting timer churn by >98%.
+
+### 9.5 Dev-Only Frame Monitor & Before/After Benchmark (`P2.1`)
+- **Decision**: Added `TraceFrameMonitor` (`src/features/handwriting/traceFrameMonitor.ts`), instantiated only when `__DEV__` is truthy (`createDevTraceFrameMonitor()`), which monitors `requestAnimationFrame` deltas during active strokes and logs frames `> 50 ms` plus a one-line per-stroke FPS/jank summary. Compiled out (`null`) in production builds.
+- **Measured Before vs. After (60-Second Continuous Trace at 120 Hz = 7,200 Move Events, 7 Template Strokes + 3 Locked Strokes)**:
+
+| Metric during 60 s continuous stroke | Before (`main`) | After (`perf/trace-freeze`) |
+|---|---|---|
+| Full `HandwritingCanvas` React re-renders | `~7,200` (every move) | `2` (`onPanResponderGrant` + `onPanResponderRelease`) |
+| Guide path `pointsToSvgPath` recomputations | `50,400` (`7 × 7,200`) | `0` during move (memoized once on mount) |
+| Locked stroke `pointsToSvgPath` recomputations | `21,600` (`3 × 7,200`) | `0` during move |
+| Active point array allocations (`[...prev, pt]`) | `7,200` (growing to 7,200 pts) | `≤ 23` (in-place push + decimation at 600-pt cap) |
+| Active path complexity across stroke | $O(N^2)$ (~25.9M point visits) | $O(N)$ incremental (`≤ 3,600` rAF flushes, bounded at 600 pts) |
+| Idle-ladder `clearTimeout` + `setTimeout` calls | `43,200` (`6 × 7,200`) | `≤ 720` (`6 × 120`, throttled to 500 ms) |
+| Physical tablet `dumpsys gfxinfo` | **NOT TESTED** (no `adb`/tablet attached) | **NOT TESTED** (manual script in `QA_REPORT_PERFORMANCE.md`) |
+

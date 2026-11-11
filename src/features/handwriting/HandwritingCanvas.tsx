@@ -34,6 +34,7 @@ import {
   MAX_STROKE_POINTS,
   pointsToSvgPath,
 } from './inkGeometry';
+import { createDevTraceFrameMonitor } from './traceFrameMonitor';
 import type { TouchActivityKind } from '../lesson/useIdleHint';
 
 // Re-exported for backwards compatibility with existing imports.
@@ -179,6 +180,9 @@ export const HandwritingCanvas: React.FC<HandwritingCanvasProps> = ({
   // The per-tick point count lives inside WatchLayer.
   const [watchStrokeIndex, setWatchStrokeIndex] = useState(0);
 
+  // Dev-only rAF frame monitor (null in release builds; logs long frames > 50 ms).
+  const frameMonitor = useMemo(() => createDevTraceFrameMonitor(), []);
+
   // At most one ink update per animation frame, regardless of touch event rate.
   const inkCoalescer = useMemo(
     () =>
@@ -192,7 +196,13 @@ export const HandwritingCanvas: React.FC<HandwritingCanvasProps> = ({
     []
   );
 
-  useEffect(() => () => inkCoalescer.cancel(), [inkCoalescer]);
+  useEffect(
+    () => () => {
+      inkCoalescer.cancel();
+      frameMonitor?.stop();
+    },
+    [inkCoalescer, frameMonitor]
+  );
 
   // Single-stroke in-place demo (triggered externally via demoStrokeRequest or internally on missed trace stroke)
   const effectiveDemoRequest = demoStrokeRequest ?? internalDemoTrigger;
@@ -248,6 +258,7 @@ export const HandwritingCanvas: React.FC<HandwritingCanvasProps> = ({
 
   const finalizeStroke = (finishedPoints: NormalizedPoint[]) => {
     isDrawingRef.current = false;
+    frameMonitor?.endStroke();
     activePointsRef.current = [];
     inkCoalescer.cancel();
     inkPathBuilderRef.current.reset();
@@ -348,6 +359,7 @@ export const HandwritingCanvas: React.FC<HandwritingCanvasProps> = ({
           activeStartRef.current = Date.now();
           activePointsRef.current = [pt];
           inkPathBuilderRef.current.reset();
+          frameMonitor?.startStroke();
           setIsDrawing(true);
           inkCoalescer.request();
         },
@@ -363,11 +375,16 @@ export const HandwritingCanvas: React.FC<HandwritingCanvasProps> = ({
             y: clampNormalized(locationY),
             timestamp: Date.now(),
           };
-          if (!appendPointThinned(activePointsRef.current, pt)) return;
+          const accepted = appendPointThinned(activePointsRef.current, pt);
+          if (!accepted) {
+            frameMonitor?.recordMoveEvent(false, activePointsRef.current.length);
+            return;
+          }
           if (activePointsRef.current.length > MAX_STROKE_POINTS) {
             // New array identity => the incremental path builder rebuilds once.
             activePointsRef.current = enforcePointCap(activePointsRef.current);
           }
+          frameMonitor?.recordMoveEvent(true, activePointsRef.current.length);
           inkCoalescer.request();
         },
         onPanResponderRelease: () => {

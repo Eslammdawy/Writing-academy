@@ -130,7 +130,10 @@ export default function GamePlayScreen() {
       : gameId;
 
   const formKey = isAr ? 'isolated' : 'uppercase';
-  const fullTemplates = targetLetter.strokeTemplates[formKey] ?? [];
+  const fullTemplates = useMemo(
+    () => targetLetter.strokeTemplates[formKey] ?? [],
+    [targetLetter, formKey]
+  );
 
   // For Complete the Monster: pre-fill all strokes except the last stroke
   const prefilledIndices = useMemo(() => {
