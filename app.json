@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "Soufy & Nadine",
+    "slug": "soufy-and-nadine",
+    "owner": "eslammdawys-team",
+    "version": "1.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "scheme": "soufyandnadine",
+    "description": "A playful Arabic and English handwriting academy for children.",
+    "icon": "./assets/images/icon.png",
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFDF7"
+    },
+    "android": {
+      "package": "com.soufyandnadine.handwriting",
+      "versionCode": 1,
+      "permissions": [],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#FFFDF7"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false
+        }
+      ],
+      "expo-font"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "d6e284e5-e6eb-4c17-ab4d-5318ca1997fd"
+      }
+    }
+  }
+}

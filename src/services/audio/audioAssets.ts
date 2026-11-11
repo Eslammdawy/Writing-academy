@@ -1,0 +1,73 @@
+export type SoundEffectKey =
+  | 'tap'
+  | 'sparkle'
+  | 'celebrate'
+  | 'gentle_hint'
+  | 'rocket_launch'
+  | 'star_earn';
+
+export const SOUND_EFFECT_ASSETS: Record<SoundEffectKey, any> = {
+  tap: require('../../../assets/audio/tap.wav'),
+  sparkle: require('../../../assets/audio/sparkle.wav'),
+  celebrate: require('../../../assets/audio/celebrate.wav'),
+  gentle_hint: require('../../../assets/audio/gentle_hint.wav'),
+  rocket_launch: require('../../../assets/audio/rocket_launch.wav'),
+  star_earn: require('../../../assets/audio/star_earn.wav'),
+};
+
+export const LETTER_AUDIO_ASSETS: Record<string, any> = {
+  en_A: require('../../../assets/audio/en_A.wav'),
+  en_B: require('../../../assets/audio/en_B.wav'),
+  en_C: require('../../../assets/audio/en_C.wav'),
+  en_D: require('../../../assets/audio/en_D.wav'),
+  en_E: require('../../../assets/audio/en_E.wav'),
+  en_F: require('../../../assets/audio/en_F.wav'),
+  en_G: require('../../../assets/audio/en_G.wav'),
+  en_H: require('../../../assets/audio/en_H.wav'),
+  en_I: require('../../../assets/audio/en_I.wav'),
+  en_J: require('../../../assets/audio/en_J.wav'),
+  en_K: require('../../../assets/audio/en_K.wav'),
+  en_L: require('../../../assets/audio/en_L.wav'),
+  en_M: require('../../../assets/audio/en_M.wav'),
+  en_N: require('../../../assets/audio/en_N.wav'),
+  en_O: require('../../../assets/audio/en_O.wav'),
+  en_P: require('../../../assets/audio/en_P.wav'),
+  en_Q: require('../../../assets/audio/en_Q.wav'),
+  en_R: require('../../../assets/audio/en_R.wav'),
+  en_S: require('../../../assets/audio/en_S.wav'),
+  en_T: require('../../../assets/audio/en_T.wav'),
+  en_U: require('../../../assets/audio/en_U.wav'),
+  en_V: require('../../../assets/audio/en_V.wav'),
+  en_W: require('../../../assets/audio/en_W.wav'),
+  en_X: require('../../../assets/audio/en_X.wav'),
+  en_Y: require('../../../assets/audio/en_Y.wav'),
+  en_Z: require('../../../assets/audio/en_Z.wav'),
+  ar_01: require('../../../assets/audio/ar_01.wav'),
+  ar_02: require('../../../assets/audio/ar_02.wav'),
+  ar_03: require('../../../assets/audio/ar_03.wav'),
+  ar_04: require('../../../assets/audio/ar_04.wav'),
+  ar_05: require('../../../assets/audio/ar_05.wav'),
+  ar_06: require('../../../assets/audio/ar_06.wav'),
+  ar_07: require('../../../assets/audio/ar_07.wav'),
+  ar_08: require('../../../assets/audio/ar_08.wav'),
+  ar_09: require('../../../assets/audio/ar_09.wav'),
+  ar_10: require('../../../assets/audio/ar_10.wav'),
+  ar_11: require('../../../assets/audio/ar_11.wav'),
+  ar_12: require('../../../assets/audio/ar_12.wav'),
+  ar_13: require('../../../assets/audio/ar_13.wav'),
+  ar_14: require('../../../assets/audio/ar_14.wav'),
+  ar_15: require('../../../assets/audio/ar_15.wav'),
+  ar_16: require('../../../assets/audio/ar_16.wav'),
+  ar_17: require('../../../assets/audio/ar_17.wav'),
+  ar_18: require('../../../assets/audio/ar_18.wav'),
+  ar_19: require('../../../assets/audio/ar_19.wav'),
+  ar_20: require('../../../assets/audio/ar_20.wav'),
+  ar_21: require('../../../assets/audio/ar_21.wav'),
+  ar_22: require('../../../assets/audio/ar_22.wav'),
+  ar_23: require('../../../assets/audio/ar_23.wav'),
+  ar_24: require('../../../assets/audio/ar_24.wav'),
+  ar_25: require('../../../assets/audio/ar_25.wav'),
+  ar_26: require('../../../assets/audio/ar_26.wav'),
+  ar_27: require('../../../assets/audio/ar_27.wav'),
+  ar_28: require('../../../assets/audio/ar_28.wav'),
+};

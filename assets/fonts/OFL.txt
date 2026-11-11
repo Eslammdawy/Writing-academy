@@ -1,0 +1,3 @@
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+Bundled typography for Soufy & Nadine Handwriting Academy (Noto Sans Arabic & Nunito).
+Permitted for bundling and redistribution in mobile applications.
