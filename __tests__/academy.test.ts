@@ -33,6 +33,11 @@ import {
   buildTodaysMission,
   evaluateDailySessionBreak,
 } from '../src/features/mission/missionPlanner';
+import {
+  aggregateGameOutcome,
+  computeWordBuilderOutcome,
+  evaluateGameCanvasRound,
+} from '../src/features/games/gameScoring';
 import { RecordedStroke } from '../src/types';
 import {
   DEFAULT_PARENT_PIN,
@@ -659,5 +664,77 @@ describe('6. Today’s Adventure Mission Planner & Session Break Suggestion (Pha
       referenceDate: refDate,
     });
     expect(dismissedRes.shouldSuggestBreak).toBe(false);
+  });
+});
+
+describe('7. Honest Game & Word Builder Scoring (Phase 4 - Fixes P12)', () => {
+  test('random scribble fails in Write to Launch and Complete the Monster games', () => {
+    const letterB = getLetterById('en_B')!;
+    const templates = letterB.strokeTemplates.uppercase!;
+
+    const randomScribble: RecordedStroke[] = [
+      {
+        points: [
+          { x: 0.9, y: 0.1 },
+          { x: 0.85, y: 0.14 },
+        ],
+        startedAt: 1000,
+        endedAt: 1200,
+      },
+    ];
+
+    const rocketRes = evaluateGameCanvasRound(
+      'write_to_launch',
+      'uppercase',
+      templates,
+      randomScribble
+    );
+    expect(rocketRes.passed).toBe(false);
+
+    const monsterRes = evaluateGameCanvasRound(
+      'complete_monster',
+      'uppercase',
+      templates,
+      randomScribble
+    );
+    expect(monsterRes.passed).toBe(false);
+
+    // Accurate final stroke passes Complete the Monster
+    const lastTemplate = templates[templates.length - 1];
+    const accurateLastStroke: RecordedStroke[] = [
+      {
+        points: lastTemplate.points,
+        startedAt: 1000,
+        endedAt: 1400,
+      },
+    ];
+    const monsterPass = evaluateGameCanvasRound(
+      'complete_monster',
+      'uppercase',
+      templates,
+      accurateLastStroke
+    );
+    expect(monsterPass.passed).toBe(true);
+    expect(monsterPass.overallScore).toBeGreaterThanOrEqual(80);
+  });
+
+  test('aggregateGameOutcome and computeWordBuilderOutcome vary score, stars, and duration with performance', () => {
+    const perfectGame = aggregateGameOutcome([100, 100, 100], 22000);
+    const strugglingGame = aggregateGameOutcome([65, 55, 65], 48000);
+    expect(perfectGame.score).toBe(100);
+    expect(perfectGame.starsEarned).toBe(3);
+    expect(perfectGame.durationSeconds).toBe(22);
+    expect(strugglingGame.score).toBe(62);
+    expect(strugglingGame.starsEarned).toBe(1);
+    expect(strugglingGame.durationSeconds).toBe(48);
+
+    const perfectWord = computeWordBuilderOutcome(3, 0, 12000);
+    const messyWord = computeWordBuilderOutcome(3, 3, 29000);
+    expect(perfectWord.score).toBe(100);
+    expect(perfectWord.starsEarned).toBe(3);
+    expect(perfectWord.durationSeconds).toBe(12);
+    expect(messyWord.score).toBeLessThan(70);
+    expect(messyWord.starsEarned).toBe(1);
+    expect(messyWord.durationSeconds).toBe(29);
   });
 });

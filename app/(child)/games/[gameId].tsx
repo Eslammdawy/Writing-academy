@@ -1,5 +1,5 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useMemo, useRef, useState } from 'react';
+import { useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   MascotBanner,
@@ -9,19 +9,28 @@ import {
 } from '../../../src/components/PlayfulUI';
 import { useAppState } from '../../../src/context/AppStateContext';
 import {
+  getLetterById,
   getLetterDistractors,
   getLettersByLanguage,
 } from '../../../src/data/curriculum';
-import { HandwritingCanvas } from '../../../src/features/handwriting/HandwritingCanvas';
+import {
+  aggregateGameOutcome,
+  computeChoiceRoundScore,
+  evaluateGameCanvasRound,
+} from '../../../src/features/games/gameScoring';
+import {
+  HandwritingCanvas,
+  TraceStrokeResultEvent,
+} from '../../../src/features/handwriting/HandwritingCanvas';
+import { useSafeNavigate } from '../../../src/hooks/useSafeNavigate';
 import { useTabletLayout } from '../../../src/hooks/useTabletLayout';
 import { audioService } from '../../../src/services/audio/audioService';
-import {
-  evaluateHandwritingAttempt,
-  SCORING_VERSION,
-} from '../../../src/services/scoring/handwritingEvaluator';
+import { narrator } from '../../../src/services/audio/narrator';
+import { SCORING_VERSION } from '../../../src/services/scoring/handwritingEvaluator';
 import { COLORS, RADIUS, SHADOWS, SPACING } from '../../../src/theme/tokens';
 import {
   AchievementType,
+  CurriculumLetter,
   GameId,
   LanguageCode,
   RecordedStroke,
@@ -31,32 +40,74 @@ import { GAMES_CATALOG } from './index';
 const TOTAL_ROUNDS = 3;
 
 export default function GamePlayScreen() {
-  const router = useRouter();
-  const params = useLocalSearchParams<{ gameId: string; lang?: string }>();
+  const nav = useSafeNavigate();
+  const params = useLocalSearchParams<{
+    gameId: string;
+    lang?: string;
+    mission?: string;
+    letters?: string;
+    nextHref?: string;
+  }>();
   const gameId = (params.gameId as GameId) || 'treasure_hunt';
-  const language: LanguageCode = params.lang === 'ar' ? 'ar' : 'en';
-  const isAr = language === 'ar';
-
   const { canvasSize } = useTabletLayout();
   const { activeChild, progressMap, recordPractice, unlockBadge } = useAppState();
 
+  const language: LanguageCode =
+    params.lang === 'ar' || params.lang === 'en'
+      ? params.lang
+      : activeChild.preferredLanguage;
+  const isAr = language === 'ar';
+
   const gameSpec =
     GAMES_CATALOG.find((g) => g.id === gameId) ?? GAMES_CATALOG[0];
-  const letters = useMemo(() => getLettersByLanguage(language), [language]);
+  const allLangLetters = useMemo(() => getLettersByLanguage(language), [language]);
+
+  // If launched from Today's Adventure, prioritize the session's practiced letters
+  const sessionLetters = useMemo(() => {
+    if (!params.letters) return null;
+    const ids = params.letters
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const resolved: CurriculumLetter[] = [];
+    for (const id of ids) {
+      const l = getLetterById(id);
+      if (l && l.language === language) resolved.push(l);
+    }
+    return resolved.length > 0 ? resolved : null;
+  }, [params.letters, language]);
 
   const [round, setRound] = useState(0);
   const [letterCursor, setLetterCursor] = useState(0);
-  const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
+  const [wrongTapsInRound, setWrongTapsInRound] = useState(0);
+  const [shakingChoiceId, setShakingChoiceId] = useState<string | null>(null);
   const [recordedStrokes, setRecordedStrokes] = useState<RecordedStroke[]>([]);
   const [rocketLaunching, setRocketLaunching] = useState(false);
   const [monsterSmiling, setMonsterSmiling] = useState(false);
   const [gameFinished, setGameFinished] = useState(false);
+  const [roundScores, setRoundScores] = useState<number[]>([]);
+  const [finalStars, setFinalStars] = useState<1 | 2 | 3>(3);
+  const [howToPlayStep, setHowToPlayStep] = useState<number>(0);
+  const [showHowToPlay, setShowHowToPlay] = useState<boolean>(true);
+  const [demoStrokeRequest, setDemoStrokeRequest] = useState<{
+    strokeIndex: number;
+    key: number;
+  } | null>(null);
 
+  const gameStartTimeRef = useRef<number>(Date.now());
   const completionRecordedRef = useRef(false);
 
-  const targetLetter = letters[(letterCursor + round * 3) % letters.length] ?? letters[0];
+  const targetLetter = useMemo(() => {
+    if (sessionLetters && sessionLetters.length > 0) {
+      return sessionLetters[(letterCursor + round) % sessionLetters.length]!;
+    }
+    return (
+      allLangLetters[(letterCursor + round * 3) % allLangLetters.length] ??
+      allLangLetters[0]
+    );
+  }, [sessionLetters, allLangLetters, letterCursor, round]);
+
   const targetProgress = progressMap[targetLetter.id];
-  // Only introduce visually-similar Arabic distractors (e.g. ب/ت/ث) once the child has started learning the letter
   const includeSimilar = (targetProgress?.attempts ?? 0) >= 1;
 
   const choices = useMemo(() => {
@@ -81,7 +132,7 @@ export default function GamePlayScreen() {
   const formKey = isAr ? 'isolated' : 'uppercase';
   const fullTemplates = targetLetter.strokeTemplates[formKey] ?? [];
 
-  // For Complete the Monster: pre-fill all strokes except the last stroke (e.g. final curve or Arabic dot!)
+  // For Complete the Monster: pre-fill all strokes except the last stroke
   const prefilledIndices = useMemo(() => {
     if (activeModeForChallenge !== 'complete_monster' || fullTemplates.length <= 1) {
       return [];
@@ -89,230 +140,386 @@ export default function GamePlayScreen() {
     return fullTemplates.slice(0, -1).map((_, idx) => idx);
   }, [activeModeForChallenge, fullTemplates]);
 
-  const finishRoundOrGame = async () => {
-    if (round + 1 < TOTAL_ROUNDS) {
-      setRound((r) => r + 1);
-      setRecordedStrokes([]);
-      setFeedbackMsg(null);
-      setRocketLaunching(false);
-      setMonsterSmiling(false);
-    } else {
-      if (!completionRecordedRef.current) {
-        completionRecordedRef.current = true;
-        audioService.playSoundEffect('celebrate');
+  // Speak rule & run ~3s looping "how to play" visual animation on round enter (WP5)
+  useEffect(() => {
+    if (gameFinished) return;
+    const vars = {
+      letter: targetLetter.character,
+      letterName: isAr ? targetLetter.nameAr.split('/')[0].trim() : targetLetter.character,
+    };
 
-        const badgeMap: Record<GameId, AchievementType> = {
-          treasure_hunt: 'treasure_hunter',
-          match_picture: 'word_builder_star',
-          write_to_launch: 'rocket_launcher',
-          complete_monster: 'monster_helper',
-          letter_challenge: 'review_champion',
-        };
-        await unlockBadge(badgeMap[gameId]);
-        await recordPractice({
-          letterId: targetLetter.id,
-          formKey,
-          mode:
-            activeModeForChallenge === 'write_to_launch' ||
-            activeModeForChallenge === 'complete_monster'
-              ? 'trace'
-              : 'recognition',
-          score: 92,
-          passed: true,
-          starsEarned: 3,
-          scoringVersion: SCORING_VERSION,
-          metricsJson: JSON.stringify({ gameId, roundsCompleted: TOTAL_ROUNDS }),
-          durationSeconds: 35,
-        });
-      }
-      setGameFinished(true);
+    if (activeModeForChallenge === 'treasure_hunt') {
+      narrator.say('game.find', vars, { language });
+    } else if (activeModeForChallenge === 'match_picture') {
+      narrator.say('game.matchPicture', vars, { language });
+    } else if (activeModeForChallenge === 'write_to_launch') {
+      narrator.say('game.launchRocket', vars, { language });
+    } else {
+      narrator.say('game.completeMonster', vars, { language });
     }
-  };
+
+    setShowHowToPlay(true);
+    let tick = 0;
+    const interval = setInterval(() => {
+      tick += 1;
+      setHowToPlayStep(tick % 2);
+    }, 550);
+    const hideTimer = setTimeout(() => {
+      clearInterval(interval);
+      setShowHowToPlay(false);
+    }, 3000);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(hideTimer);
+    };
+  }, [round, activeModeForChallenge, targetLetter, isAr, language, gameFinished]);
+
+  // Auto-transition to Today's Adventure completion when `nextHref` is provided
+  useEffect(() => {
+    if (!gameFinished || !params.nextHref) return;
+    const timer = setTimeout(() => {
+      nav.replace(params.nextHref!);
+    }, 2800);
+    return () => clearTimeout(timer);
+  }, [gameFinished, params.nextHref, nav]);
+
+  const finishRoundOrGame = useCallback(
+    async (roundScore: number) => {
+      const nextScores = [...roundScores, roundScore];
+      setRoundScores(nextScores);
+
+      if (round + 1 < TOTAL_ROUNDS) {
+        setRound((r) => r + 1);
+        setWrongTapsInRound(0);
+        setShakingChoiceId(null);
+        setRecordedStrokes([]);
+        setRocketLaunching(false);
+        setMonsterSmiling(false);
+      } else {
+        const outcome = aggregateGameOutcome(
+          nextScores,
+          Date.now() - gameStartTimeRef.current
+        );
+        setFinalStars(outcome.starsEarned);
+
+        if (!completionRecordedRef.current) {
+          completionRecordedRef.current = true;
+          audioService.playSoundEffect('celebrate');
+
+          const badgeMap: Record<GameId, AchievementType> = {
+            treasure_hunt: 'treasure_hunter',
+            match_picture: 'word_builder_star',
+            write_to_launch: 'rocket_launcher',
+            complete_monster: 'monster_helper',
+            letter_challenge: 'review_champion',
+          };
+          if (outcome.passed) {
+            await unlockBadge(badgeMap[gameId]);
+          }
+          await recordPractice({
+            letterId: targetLetter.id,
+            formKey,
+            mode:
+              activeModeForChallenge === 'write_to_launch' ||
+              activeModeForChallenge === 'complete_monster'
+                ? 'trace'
+                : 'recognition',
+            score: outcome.score,
+            passed: outcome.passed,
+            starsEarned: outcome.starsEarned,
+            scoringVersion: SCORING_VERSION,
+            metricsJson: JSON.stringify({
+              gameId,
+              roundsCompleted: TOTAL_ROUNDS,
+              roundScores: nextScores,
+            }),
+            durationSeconds: outcome.durationSeconds,
+          });
+        }
+        setGameFinished(true);
+      }
+    },
+    [
+      roundScores,
+      round,
+      gameId,
+      targetLetter.id,
+      formKey,
+      activeModeForChallenge,
+      unlockBadge,
+      recordPractice,
+    ]
+  );
 
   const handleChoiceSelect = async (pickedId: string) => {
+    setShowHowToPlay(false);
     if (pickedId === targetLetter.id) {
       audioService.playSoundEffect('sparkle');
       audioService.pronounceLetter(targetLetter);
-      setFeedbackMsg(
-        isAr ? '🎉 إجابة صحيحة! عمل رائع!' : '🎉 Correct! Wonderful job!'
-      );
+      narrator.say('game.correct', undefined, { language });
+      const earnedScore = computeChoiceRoundScore(wrongTapsInRound);
       setTimeout(() => {
-        finishRoundOrGame();
+        finishRoundOrGame(earnedScore);
       }, 650);
     } else {
+      // Gentle shake + highlight correct tile after 2nd miss + play letter sound (WP5)
+      const nextWrong = wrongTapsInRound + 1;
+      setWrongTapsInRound(nextWrong);
+      setShakingChoiceId(pickedId);
+      setTimeout(() => setShakingChoiceId(null), 380);
+
       audioService.playSoundEffect('gentle_hint');
-      setFeedbackMsg(
-        isAr
-          ? `ابحث مرة أخرى عن ${targetLetter.nameAr} (${targetLetter.character})!`
-          : `Try again! Look for ${targetLetter.character} (${targetLetter.example.word})!`
-      );
-    }
-  };
-
-  const handleCanvasSubmit = async () => {
-    const templatesToCheck =
-      activeModeForChallenge === 'complete_monster' && fullTemplates.length > 1
-        ? [fullTemplates[fullTemplates.length - 1]]
-        : fullTemplates;
-
-    const evalRes = evaluateHandwritingAttempt(
-      'trace',
-      formKey,
-      templatesToCheck,
-      recordedStrokes
-    );
-
-    if (evalRes.passed || recordedStrokes.length >= 1) {
-      if (activeModeForChallenge === 'write_to_launch') {
-        audioService.playSoundEffect('rocket_launch');
-        setRocketLaunching(true);
-      } else {
-        audioService.playSoundEffect('celebrate');
-        setMonsterSmiling(true);
+      audioService.pronounceLetter(targetLetter);
+      if (nextWrong >= 2) {
+        narrator.say('game.tryAgain', undefined, { language });
       }
-      setFeedbackMsg(
-        isAr ? evalRes.encouragementTitleAr : evalRes.encouragementTitleEn
-      );
-      setTimeout(() => {
-        finishRoundOrGame();
-      }, 950);
-    } else {
-      audioService.playSoundEffect('gentle_hint');
-      setFeedbackMsg(isAr ? evalRes.gentleHintAr : evalRes.gentleHintEn);
     }
   };
+
+  const handleEvaluateCanvasGame = useCallback(
+    (strokesToEval: RecordedStroke[]) => {
+      const gameMode =
+        activeModeForChallenge === 'complete_monster'
+          ? 'complete_monster'
+          : 'write_to_launch';
+      const evalRes = evaluateGameCanvasRound(
+        gameMode,
+        formKey,
+        fullTemplates,
+        strokesToEval
+      );
+
+      if (evalRes.passed) {
+        if (gameMode === 'write_to_launch') {
+          audioService.playSoundEffect('rocket_launch');
+          setRocketLaunching(true);
+        } else {
+          audioService.playSoundEffect('celebrate');
+          setMonsterSmiling(true);
+        }
+        narrator.say('game.correct', undefined, { language });
+        setTimeout(() => {
+          finishRoundOrGame(evalRes.overallScore);
+        }, 900);
+      } else {
+        const nextWrong = wrongTapsInRound + 1;
+        setWrongTapsInRound(nextWrong);
+        audioService.playSoundEffect('gentle_hint');
+        narrator.say('lesson.stroke.retry', undefined, { language });
+        if (nextWrong >= 2) {
+          const targetIdx =
+            gameMode === 'complete_monster'
+              ? Math.max(0, fullTemplates.length - 1)
+              : 0;
+          setDemoStrokeRequest({ strokeIndex: targetIdx, key: Date.now() });
+        }
+      }
+    },
+    [
+      activeModeForChallenge,
+      formKey,
+      fullTemplates,
+      language,
+      wrongTapsInRound,
+      finishRoundOrGame,
+    ]
+  );
+
+  // Auto-submit canvas game round when per-stroke trace finishes all required strokes!
+  const handleTraceStrokeResult = useCallback(
+    (event: TraceStrokeResultEvent) => {
+      setShowHowToPlay(false);
+      if (event.passed) {
+        audioService.playSoundEffect('sparkle');
+        if (event.completedAllStrokes) {
+          handleEvaluateCanvasGame(event.allStrokes);
+        }
+      } else {
+        const nextWrong = wrongTapsInRound + 1;
+        setWrongTapsInRound(nextWrong);
+        audioService.playSoundEffect('gentle_hint');
+        narrator.say('lesson.stroke.retry', undefined, { language });
+      }
+    },
+    [handleEvaluateCanvasGame, wrongTapsInRound, language]
+  );
 
   const handleRestartGame = () => {
     completionRecordedRef.current = false;
+    gameStartTimeRef.current = Date.now();
     setRound(0);
+    setRoundScores([]);
+    setWrongTapsInRound(0);
+    setShakingChoiceId(null);
     setLetterCursor((c) => c + 2);
     setRecordedStrokes([]);
-    setFeedbackMsg(null);
     setRocketLaunching(false);
     setMonsterSmiling(false);
     setGameFinished(false);
   };
 
+  const highlightCorrectTile = wrongTapsInRound >= 2;
+
   return (
-    <ScreenContainer>
+    <ScreenContainer scroll={false}>
       <TopAdventureHeader
-        title={isAr ? gameSpec.titleAr : gameSpec.titleEn}
-        subtitle={
-          isAr
-            ? `الجولة ${round + 1} من ${TOTAL_ROUNDS}`
-            : `Round ${round + 1} of ${TOTAL_ROUNDS}`
-        }
+        title={`${gameSpec.emoji} ${isAr ? gameSpec.titleAr : gameSpec.titleEn}`}
+        subtitle={`${round + 1} / ${TOTAL_ROUNDS}`}
         language={language}
         childName={activeChild.name}
         childAvatar={activeChild.avatar}
         starsCount={activeChild.starsCount}
-        onBack={() => router.push('/(child)/games')}
-        onHome={() => router.push('/(child)/home')}
+        onBack={() => nav.back('/(child)/games')}
+        onHome={nav.goHome}
       />
 
       {gameFinished ? (
         <View style={[styles.celebrationCard, SHADOWS.card]}>
-          <Text style={styles.bigCelebrationEmoji}>🏆⭐🎉</Text>
+          <View style={styles.starsCelebrationRow}>
+            {[1, 2, 3].map((s) => (
+              <Text
+                key={s}
+                style={[
+                  styles.bigCelebrationStar,
+                  { opacity: s <= finalStars ? 1 : 0.25 },
+                ]}
+              >
+                ⭐
+              </Text>
+            ))}
+          </View>
           <Text style={styles.celebrationTitle}>
-            {isAr ? 'أحسنت يا بطل! أكملت اللعبة!' : 'Hooray! You Completed the Game!'}
-          </Text>
-          <Text style={styles.celebrationSubtitle}>
-            {isAr
-              ? 'حصلت على ٣ نجوم ذهبية وملصق جديد في ألبومك!'
-              : 'You earned +3 Golden Stars and a Sticker Badge for your album!'}
+            {isAr ? 'رائع! أكملنا اللعبة!' : 'Hooray! You did it!'}
           </Text>
 
           <View style={styles.finishButtonsRow}>
-            <PlayfulButton
-              emoji="🔄"
-              label={isAr ? 'العب مرة أخرى' : 'Play Again'}
-              color={COLORS.skyBlue}
-              onPress={handleRestartGame}
-              style={{ flex: 1 }}
-            />
-            <PlayfulButton
-              emoji="🎮"
-              label={isAr ? 'كل الألعاب' : 'Games Lobby'}
-              color={COLORS.mintGreen}
-              onPress={() => router.push('/(child)/games')}
-              style={{ flex: 1 }}
-            />
+            {params.nextHref ? (
+              <PlayfulButton
+                emoji="▶"
+                label={isAr ? 'متابعة' : 'Continue'}
+                color={COLORS.mintGreen}
+                minHeight={80}
+                onPress={() => nav.replace(params.nextHref!)}
+                style={{ flex: 1 }}
+              />
+            ) : (
+              <>
+                <PlayfulButton
+                  emoji="🔄"
+                  label={isAr ? 'مرة أخرى' : 'Play Again'}
+                  color={COLORS.skyBlue}
+                  minHeight={76}
+                  onPress={handleRestartGame}
+                  style={{ flex: 1 }}
+                />
+                <PlayfulButton
+                  emoji="🎮"
+                  label={isAr ? 'الألعاب' : 'Games'}
+                  color={COLORS.mintGreen}
+                  minHeight={76}
+                  onPress={() => nav.replace(`/(child)/games?lang=${language}`)}
+                  style={{ flex: 1 }}
+                />
+              </>
+            )}
           </View>
         </View>
       ) : (
         <>
           <MascotBanner
             mascotEmoji={gameSpec.emoji}
-            title={
-              feedbackMsg ??
-              (activeModeForChallenge === 'treasure_hunt'
-                ? isAr
-                  ? `افتح الصندوق الذي يحتوي على: ${targetLetter.nameAr}`
-                  : `Find the treasure chest with: ${targetLetter.nameEn}`
-                : activeModeForChallenge === 'match_picture'
-                  ? isAr
-                    ? `أي صورة تبدأ بحرف (${targetLetter.character})؟`
-                    : `Which picture starts with the letter "${targetLetter.character}"?`
-                  : activeModeForChallenge === 'write_to_launch'
-                    ? isAr
-                      ? `اكتب حرف (${targetLetter.character}) لإطلاق الصاروخ! 🚀`
-                      : `Trace letter "${targetLetter.character}" to launch the rocket! 🚀`
-                    : isAr
-                      ? `أكمل الجزء الناقص من حرف (${targetLetter.character}) ليبتسم الوحش! 👾`
-                      : `Complete the missing stroke of "${targetLetter.character}" for the friendly monster! 👾`)
-            }
+            title={`${targetLetter.character}  ${targetLetter.example.emoji} ${targetLetter.example.word}`}
             message={
-              isAr
-                ? `مثال: ${targetLetter.example.word} ${targetLetter.example.emoji}`
-                : `Hint: ${targetLetter.character} is for ${targetLetter.example.word} ${targetLetter.example.emoji}`
+              showHowToPlay
+                ? isAr
+                  ? '👆 شاهد واتبع الإشارة!'
+                  : '👆 Watch and follow the pointer!'
+                : isAr
+                  ? 'اضغط هنا لسماع الصوت مرة أخرى 🔊'
+                  : 'Tap here to hear it again 🔊'
             }
             isRtl={isAr}
-            onAudioReplay={() => audioService.pronounceLetter(targetLetter)}
+            onAudioReplay={() => {
+              audioService.pronounceLetter(targetLetter);
+              narrator.repeat();
+            }}
           />
 
           {/* Game Mechanics 1 & 2: Treasure Hunt OR Match the Picture */}
           {activeModeForChallenge === 'treasure_hunt' ||
           activeModeForChallenge === 'match_picture' ? (
             <View style={[styles.gameStageCard, SHADOWS.card]}>
-              <View style={styles.promptBanner}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Play target letter sound"
+                onPress={() => audioService.pronounceLetter(targetLetter)}
+                style={styles.promptBanner}
+              >
                 <Text style={styles.promptEmoji}>
                   {activeModeForChallenge === 'treasure_hunt'
                     ? targetLetter.example.emoji
                     : '🔊'}
                 </Text>
-                <Text style={styles.promptTargetText}>
-                  {activeModeForChallenge === 'treasure_hunt'
-                    ? `${targetLetter.character}`
-                    : `${targetLetter.character} (${targetLetter.soundLabel})`}
-                </Text>
-              </View>
-
-              <View style={styles.choicesGrid}>
-                {choices.map((item) => (
-                  <Pressable
-                    key={item.id}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Choice ${item.character} ${item.example.word}`}
-                    onPress={() => handleChoiceSelect(item.id)}
-                    style={({ pressed }) => [
-                      styles.choiceCard,
-                      SHADOWS.button,
-                      { transform: [{ scale: pressed ? 0.96 : 1 }] },
+                <Text style={styles.promptTargetText}>{targetLetter.character}</Text>
+                {showHowToPlay ? (
+                  <Text
+                    style={[
+                      styles.howToPlayFinger,
+                      {
+                        transform: [{ translateY: howToPlayStep === 0 ? -6 : 6 }],
+                      },
                     ]}
                   >
-                    {activeModeForChallenge === 'treasure_hunt' ? (
-                      <>
-                        <Text style={styles.chestIcon}>🎁</Text>
-                        <Text style={styles.choiceBigLetter}>{item.character}</Text>
-                      </>
-                    ) : (
-                      <>
-                        <Text style={styles.choiceBigEmoji}>{item.example.emoji}</Text>
-                        <Text style={styles.choiceWordText}>{item.example.word}</Text>
-                      </>
-                    )}
-                  </Pressable>
-                ))}
+                    👆
+                  </Text>
+                ) : null}
+              </Pressable>
+
+              <View style={styles.choicesGrid}>
+                {choices.map((item) => {
+                  const isCorrect = item.id === targetLetter.id;
+                  const isGlowing = highlightCorrectTile && isCorrect;
+                  const isShaking = shakingChoiceId === item.id;
+
+                  return (
+                    <Pressable
+                      key={item.id}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Choice ${item.character} ${item.example.word}`}
+                      onPress={() => handleChoiceSelect(item.id)}
+                      style={({ pressed }) => [
+                        styles.choiceCard,
+                        SHADOWS.button,
+                        isGlowing && styles.choiceCardGlowing,
+                        {
+                          transform: [
+                            { scale: pressed ? 0.95 : isGlowing ? 1.06 : 1 },
+                            { translateX: isShaking ? -8 : 0 },
+                          ],
+                        },
+                      ]}
+                    >
+                      {activeModeForChallenge === 'treasure_hunt' ? (
+                        <>
+                          <Text style={styles.chestIcon}>
+                            {isGlowing ? '✨🎁✨' : '🎁'}
+                          </Text>
+                          <Text style={styles.choiceBigLetter}>{item.character}</Text>
+                        </>
+                      ) : (
+                        <>
+                          <Text style={styles.choiceBigEmoji}>
+                            {item.example.emoji}
+                          </Text>
+                          <Text style={styles.choiceWordText}>
+                            {item.example.word}
+                          </Text>
+                        </>
+                      )}
+                    </Pressable>
+                  );
+                })}
               </View>
             </View>
           ) : (
@@ -325,81 +532,93 @@ export default function GamePlayScreen() {
                   templates={fullTemplates}
                   recordedStrokes={recordedStrokes}
                   onStrokesChange={setRecordedStrokes}
-                  canvasSize={Math.min(canvasSize, 420)}
+                  canvasSize={Math.min(canvasSize, 410)}
                   prefilledTemplateIndices={prefilledIndices}
+                  perStrokeTrace
+                  onTraceStrokeResult={handleTraceStrokeResult}
+                  pulseStartBadge={showHowToPlay || highlightCorrectTile}
+                  demoStrokeRequest={demoStrokeRequest}
+                  hideTopRibbon
                 />
 
                 <View style={styles.canvasGameActions}>
-                  <PlayfulButton
-                    emoji="🧹"
-                    label={isAr ? 'مسح' : 'Clear'}
-                    color={COLORS.textSecondary}
-                    variant="outline"
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={isAr ? 'شاهد' : 'Show me'}
+                    onPress={() => {
+                      const targetIdx =
+                        activeModeForChallenge === 'complete_monster'
+                          ? Math.max(0, fullTemplates.length - 1)
+                          : Math.min(
+                              recordedStrokes.length,
+                              Math.max(0, fullTemplates.length - 1)
+                            );
+                      setDemoStrokeRequest({ strokeIndex: targetIdx, key: Date.now() });
+                    }}
+                    style={styles.roundActionIconBtn}
+                  >
+                    <Text style={styles.roundActionIconText}>👀</Text>
+                  </Pressable>
+
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={isAr ? 'مسح' : 'Clear'}
+                    disabled={recordedStrokes.length === 0}
                     onPress={() => setRecordedStrokes([])}
-                  />
-                  <PlayfulButton
-                    emoji={
-                      activeModeForChallenge === 'write_to_launch' ? '🚀' : '👾'
-                    }
-                    label={
+                    style={[
+                      styles.roundActionIconBtn,
+                      { opacity: recordedStrokes.length === 0 ? 0.4 : 1 },
+                    ]}
+                  >
+                    <Text style={styles.roundActionIconText}>🧹</Text>
+                  </Pressable>
+
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={
                       activeModeForChallenge === 'write_to_launch'
-                        ? isAr
-                          ? 'أطلق الصاروخ!'
-                          : 'Launch Rocket!'
-                        : isAr
-                          ? 'أكمل الوحش!'
-                          : 'Complete Monster!'
-                    }
-                    color={
-                      activeModeForChallenge === 'write_to_launch'
-                        ? COLORS.coralOrange
-                        : COLORS.lavenderPurple
+                        ? 'Launch Rocket'
+                        : 'Complete Monster'
                     }
                     disabled={recordedStrokes.length === 0}
-                    onPress={handleCanvasSubmit}
-                  />
+                    onPress={() => handleEvaluateCanvasGame(recordedStrokes)}
+                    style={[
+                      styles.roundActionIconBtn,
+                      {
+                        backgroundColor:
+                          activeModeForChallenge === 'write_to_launch'
+                            ? COLORS.coralOrange
+                            : COLORS.lavenderPurple,
+                        opacity: recordedStrokes.length === 0 ? 0.45 : 1,
+                      },
+                    ]}
+                  >
+                    <Text style={styles.roundActionIconText}>
+                      {activeModeForChallenge === 'write_to_launch' ? '🚀' : '👾'}
+                    </Text>
+                  </Pressable>
                 </View>
               </View>
 
               {/* Animated Rocket or Friendly Monster Companion Panel */}
               <View style={[styles.companionCard, SHADOWS.card]}>
                 {activeModeForChallenge === 'write_to_launch' ? (
-                  <>
-                    <Text
-                      style={[
-                        styles.companionHeroEmoji,
-                        rocketLaunching && { transform: [{ translateY: -28 }] },
-                      ]}
-                    >
-                      {rocketLaunching ? '🚀✨🔥' : '🚀'}
-                    </Text>
-                    <Text style={styles.companionTitle}>
-                      {rocketLaunching
-                        ? isAr
-                          ? 'انطلاق رائع إلى الفضاء!'
-                          : '3... 2... 1... Blast Off!'
-                        : isAr
-                          ? 'الصاروخ جاهز على المنصة'
-                          : 'Rocket Ready on Launchpad'}
-                    </Text>
-                  </>
+                  <Text
+                    style={[
+                      styles.companionHeroEmoji,
+                      rocketLaunching && { transform: [{ translateY: -28 }] },
+                    ]}
+                  >
+                    {rocketLaunching ? '🚀✨🔥' : '🚀'}
+                  </Text>
                 ) : (
-                  <>
-                    <Text style={styles.companionHeroEmoji}>
-                      {monsterSmiling ? '👾🎉💖' : '👾❓'}
-                    </Text>
-                    <Text style={styles.companionTitle}>
-                      {monsterSmiling
-                        ? isAr
-                          ? 'الوحش اللطيف سعيد جدًا!'
-                          : 'Monster Buddy is Super Happy!'
-                        : isAr
-                          ? 'أكمل الخط أو النقطة الأخيرة!'
-                          : 'Finish the missing curve or dot!'}
-                    </Text>
-                  </>
+                  <Text style={styles.companionHeroEmoji}>
+                    {monsterSmiling ? '👾🎉💖' : '👾'}
+                  </Text>
                 )}
-                <Text style={styles.companionTargetChar}>{targetLetter.character}</Text>
+                <Text style={styles.companionTargetChar}>
+                  {targetLetter.character}
+                </Text>
                 <Text style={styles.companionWord}>
                   {targetLetter.example.emoji} {targetLetter.example.word}
                 </Text>
@@ -414,10 +633,12 @@ export default function GamePlayScreen() {
 
 const styles = StyleSheet.create({
   gameStageCard: {
+    flex: 1,
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.xl,
-    padding: SPACING.xl,
+    padding: SPACING.lg,
     alignItems: 'center',
+    justifyContent: 'center',
     gap: SPACING.lg,
   },
   promptBanner: {
@@ -435,30 +656,40 @@ const styles = StyleSheet.create({
     fontSize: 44,
   },
   promptTargetText: {
-    fontSize: 42,
+    fontSize: 48,
     fontWeight: '900',
     color: COLORS.textPrimary,
     fontFamily: 'NotoSansArabic-Regular',
+  },
+  howToPlayFinger: {
+    fontSize: 36,
   },
   choicesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
-    gap: SPACING.lg,
+    gap: 20, // >= 16 dp spacing (WP9)
     width: '100%',
   },
   choiceCard: {
     width: '44%',
     minWidth: 180,
     maxWidth: 260,
+    minHeight: 136,
     backgroundColor: COLORS.surfaceSoft,
     borderRadius: RADIUS.xl,
     paddingVertical: SPACING.lg,
     paddingHorizontal: SPACING.md,
     alignItems: 'center',
-    borderWidth: 3,
+    justifyContent: 'center',
+    borderWidth: 3.5,
     borderColor: COLORS.skyBlueLight,
     gap: 8,
+  },
+  choiceCardGlowing: {
+    backgroundColor: COLORS.sunshineYellowLight,
+    borderColor: COLORS.sunshineYellow,
+    borderWidth: 6,
   },
   chestIcon: {
     fontSize: 32,
@@ -470,7 +701,7 @@ const styles = StyleSheet.create({
     fontFamily: 'NotoSansArabic-Regular',
   },
   choiceBigEmoji: {
-    fontSize: 58,
+    fontSize: 60,
   },
   choiceWordText: {
     fontSize: 24,
@@ -479,6 +710,7 @@ const styles = StyleSheet.create({
     fontFamily: 'NotoSansArabic-Regular',
   },
   canvasGameRow: {
+    flex: 1,
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
@@ -491,11 +723,24 @@ const styles = StyleSheet.create({
   },
   canvasGameActions: {
     flexDirection: 'row',
-    gap: SPACING.md,
+    gap: 20, // >= 16 dp spacing (WP9)
+  },
+  roundActionIconBtn: {
+    width: 76, // >= 72 dp (WP9)
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: COLORS.surface,
+    borderWidth: 3,
+    borderColor: COLORS.borderCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roundActionIconText: {
+    fontSize: 34,
   },
   companionCard: {
-    minWidth: 250,
-    maxWidth: 340,
+    minWidth: 220,
+    maxWidth: 300,
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.xl,
     padding: SPACING.xl,
@@ -505,12 +750,6 @@ const styles = StyleSheet.create({
   companionHeroEmoji: {
     fontSize: 68,
   },
-  companionTitle: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: COLORS.textPrimary,
-    textAlign: 'center',
-  },
   companionTargetChar: {
     fontSize: 64,
     fontWeight: '900',
@@ -518,40 +757,37 @@ const styles = StyleSheet.create({
     fontFamily: 'NotoSansArabic-Regular',
   },
   companionWord: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: '800',
     color: COLORS.textSecondary,
   },
   celebrationCard: {
+    flex: 1,
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.xl,
     padding: SPACING.xxl,
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 4,
     borderColor: COLORS.sunshineYellow,
-    marginTop: SPACING.lg,
+    gap: SPACING.lg,
   },
-  bigCelebrationEmoji: {
+  starsCelebrationRow: {
+    flexDirection: 'row',
+    gap: SPACING.md,
+  },
+  bigCelebrationStar: {
     fontSize: 68,
-    marginBottom: SPACING.md,
   },
   celebrationTitle: {
-    fontSize: 32,
+    fontSize: 34,
     fontWeight: '900',
     color: COLORS.textPrimary,
     textAlign: 'center',
   },
-  celebrationSubtitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    marginTop: SPACING.sm,
-    marginBottom: SPACING.xl,
-  },
   finishButtonsRow: {
     flexDirection: 'row',
-    gap: SPACING.md,
+    gap: 20,
     width: '100%',
     maxWidth: 460,
   },
