@@ -15,8 +15,20 @@ import {
 import { pointsToSvgPath } from '../src/data/strokeGeometry';
 import {
   evaluateHandwritingAttempt,
+  evaluateStrokeAgainstTemplate,
   SCORING_VERSION,
 } from '../src/services/scoring/handwritingEvaluator';
+import {
+  createInitialLessonState,
+  GuidedLessonRunner,
+  lessonReducer,
+} from '../src/features/lesson/lessonMachine';
+import {
+  IDLE_DEMO_MS,
+  IDLE_PULSE_MS,
+  IDLE_STUCK_MS,
+  IdleHintScheduler,
+} from '../src/features/lesson/useIdleHint';
 import { RecordedStroke } from '../src/types';
 import {
   DEFAULT_PARENT_PIN,
@@ -382,5 +394,189 @@ describe('4. Voice-First Narrator Queue & Local Date Utilities (Phase 1)', () =>
     const localRef = new Date(2026, 10, 11, 23, 30, 0); // Nov 11, 2026 23:30 local
     expect(getLocalDateString(localRef)).toBe('2026-11-11');
     expect(isSameLocalDay(localRef.toISOString(), localRef)).toBe(true);
+  });
+});
+
+describe('5. Core Lesson Machine, Per-Stroke Evaluation, Idle & Fail-Soft Ladders (Phase 2)', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test('evaluateStrokeAgainstTemplate checks individual stroke coverage and direction', () => {
+    const letterA = getLetterById('en_A')!;
+    const firstStroke = letterA.strokeTemplates.uppercase![0];
+
+    // Valid stroke following the template path
+    const goodDetail = evaluateStrokeAgainstTemplate(
+      firstStroke,
+      firstStroke.points,
+      'trace'
+    );
+    expect(goodDetail.matched).toBe(true);
+    expect(goodDetail.directionCorrect).toBe(true);
+    expect(goodDetail.coverageScore).toBeGreaterThanOrEqual(90);
+
+    // Reversed stroke (drawn bottom-to-top instead of top-to-bottom)
+    const reversedPts = [...firstStroke.points].reverse();
+    const reversedDetail = evaluateStrokeAgainstTemplate(
+      firstStroke,
+      reversedPts,
+      'trace'
+    );
+    expect(reversedDetail.directionCorrect).toBe(false);
+    expect(reversedDetail.matched).toBe(false);
+
+    // Distant scribble
+    const scribbleDetail = evaluateStrokeAgainstTemplate(
+      firstStroke,
+      [
+        { x: 0.92, y: 0.92 },
+        { x: 0.95, y: 0.95 },
+      ],
+      'trace'
+    );
+    expect(scribbleDetail.matched).toBe(false);
+  });
+
+  test('IdleHintScheduler escalates at 6s (pulse), 12s (stroke demo), and 25s (stuck) with fake timers', () => {
+    jest.useFakeTimers();
+    const events: string[] = [];
+
+    const scheduler = new IdleHintScheduler({
+      onPulseHint: () => events.push('pulse_6s'),
+      onReplayStrokeDemo: () => events.push('demo_12s'),
+      onStuck: () => events.push('stuck_25s'),
+    });
+
+    scheduler.start();
+    jest.advanceTimersByTime(IDLE_PULSE_MS - 100);
+    expect(events).toEqual([]);
+
+    jest.advanceTimersByTime(200);
+    expect(events).toEqual(['pulse_6s']);
+
+    jest.advanceTimersByTime(IDLE_DEMO_MS - IDLE_PULSE_MS);
+    expect(events).toEqual(['pulse_6s', 'demo_12s']);
+
+    // Activity resets timers before 25s
+    scheduler.resetActivity();
+    jest.advanceTimersByTime(IDLE_PULSE_MS);
+    expect(events).toEqual(['pulse_6s', 'demo_12s', 'pulse_6s']);
+
+    jest.advanceTimersByTime(IDLE_STUCK_MS - IDLE_PULSE_MS);
+    expect(events).toEqual([
+      'pulse_6s',
+      'demo_12s',
+      'pulse_6s',
+      'demo_12s',
+      'stuck_25s',
+    ]);
+    scheduler.stop();
+  });
+
+  test('GuidedLessonRunner drives a full English lesson (uppercase + lowercase) with simulated strokes and zero UI taps', () => {
+    jest.useFakeTimers();
+    const letterA = getLetterById('en_A')!;
+    const runner = new GuidedLessonRunner(letterA, {
+      introMs: 1000,
+      watchMs: 800,
+      celebrateMs: 1000,
+      gentleSkipMs: 1000,
+    });
+
+    runner.start();
+    expect(runner.getState().phase).toBe('INTRO');
+    expect(runner.getState().currentForm).toBe('uppercase');
+
+    // Auto-advance INTRO -> WATCH -> TRACE for uppercase
+    jest.advanceTimersByTime(1000);
+    expect(runner.getState().phase).toBe('WATCH');
+    jest.advanceTimersByTime(800);
+    expect(runner.getState().phase).toBe('TRACE');
+
+    // Draw each uppercase stroke in TRACE
+    const upperTemplates = letterA.strokeTemplates.uppercase!;
+    for (let i = 0; i < upperTemplates.length; i++) {
+      runner.dispatch({
+        type: 'TRACE_STROKE_DRAWN',
+        points: upperTemplates[i].points,
+      });
+    }
+    // Automatically in WRITE for uppercase
+    expect(runner.getState().phase).toBe('WRITE');
+
+    // Submit uppercase WRITE strokes -> automatically moves to WATCH for lowercase!
+    runner.dispatch({
+      type: 'WRITE_SUBMIT',
+      strokes: upperTemplates.map((t) => ({
+        points: t.points,
+        startedAt: 100,
+        endedAt: 400,
+      })),
+    });
+    expect(runner.getState().phase).toBe('WATCH');
+    expect(runner.getState().currentForm).toBe('lowercase');
+
+    // Auto-advance WATCH -> TRACE for lowercase
+    jest.advanceTimersByTime(800);
+    expect(runner.getState().phase).toBe('TRACE');
+
+    const lowerTemplates = letterA.strokeTemplates.lowercase!;
+    for (let i = 0; i < lowerTemplates.length; i++) {
+      runner.dispatch({
+        type: 'TRACE_STROKE_DRAWN',
+        points: lowerTemplates[i].points,
+      });
+    }
+    expect(runner.getState().phase).toBe('WRITE');
+
+    runner.dispatch({
+      type: 'WRITE_SUBMIT',
+      strokes: lowerTemplates.map((t) => ({
+        points: t.points,
+        startedAt: 100,
+        endedAt: 400,
+      })),
+    });
+    expect(runner.getState().phase).toBe('CELEBRATE');
+    expect(runner.getState().starsEarned).toBe(3);
+
+    // Auto-advance CELEBRATE -> DONE
+    jest.advanceTimersByTime(1000);
+    expect(runner.getState().phase).toBe('DONE');
+    runner.stop();
+  });
+
+  test('Fail-soft ladder: 2 consecutive fails return to slower WATCH with wider tolerance; 3rd fail triggers GENTLE_SKIP with effort star and needsHelp flag', () => {
+    const baa = getLetterById('ar_02')!;
+    let state = createInitialLessonState(baa);
+    state = lessonReducer(state, { type: 'INTRO_COMPLETE' });
+    state = lessonReducer(state, { type: 'WATCH_COMPLETE' });
+    expect(state.phase).toBe('TRACE');
+
+    // 1st failed attempt (stuck or 2 missed strokes)
+    state = lessonReducer(state, { type: 'IDLE_STUCK' });
+    expect(state.consecutiveFails).toBe(1);
+    expect(state.phase).toBe('TRACE');
+    expect(state.lastNarrationKey).toBe('lesson.retry');
+
+    // 2nd consecutive failed attempt -> returns to WATCH with slowWatch & wideThresholds
+    state = lessonReducer(state, { type: 'IDLE_STUCK' });
+    expect(state.consecutiveFails).toBe(2);
+    expect(state.phase).toBe('WATCH');
+    expect(state.slowWatch).toBe(true);
+    expect(state.useWideThresholds).toBe(true);
+
+    // Move back to TRACE after slow WATCH, then fail 3rd time -> GENTLE_SKIP
+    state = lessonReducer(state, { type: 'WATCH_COMPLETE' });
+    state = lessonReducer(state, { type: 'IDLE_STUCK' });
+    expect(state.consecutiveFails).toBe(3);
+    expect(state.phase).toBe('GENTLE_SKIP');
+    expect(state.starsEarned).toBe(1);
+    expect(state.flaggedNeedsHelp).toBe(true);
+    expect(state.lastNarrationKey).toBe('lesson.gentleSkip');
+
+    state = lessonReducer(state, { type: 'GENTLE_SKIP_COMPLETE' });
+    expect(state.phase).toBe('DONE');
   });
 });

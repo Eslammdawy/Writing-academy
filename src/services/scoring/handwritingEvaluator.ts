@@ -8,7 +8,7 @@ import {
   StrokeEvaluationDetail,
 } from '../../types';
 
-export const SCORING_VERSION = '1.0.0-deterministic';
+export const SCORING_VERSION = '1.1.0-deterministic';
 
 export interface ScoringThresholds {
   /** Maximum Euclidean distance in normalized [0..1] space to count a template point as covered */
@@ -32,6 +32,20 @@ export const DEFAULT_BEGINNER_THRESHOLDS: ScoringThresholds = {
   passThreshold: 55,
   twoStarThreshold: 70,
   threeStarThreshold: 84,
+};
+
+/**
+ * Wider tolerance used for a single retry attempt after 2 consecutive failed attempts
+ * in the fail-soft ladder (WP4).
+ */
+export const WIDE_ASSISTED_THRESHOLDS: ScoringThresholds = {
+  coverageRadiusTrace: 0.2,
+  coverageRadiusWrite: 0.25,
+  endpointRadius: 0.28,
+  dotRadius: 0.24,
+  passThreshold: 45,
+  twoStarThreshold: 65,
+  threeStarThreshold: 80,
 };
 
 export function euclideanDistance(a: NormalizedPoint, b: NormalizedPoint): number {
@@ -212,6 +226,24 @@ function evaluateSingleStroke(
     startAccuracyScore,
     endAccuracyScore,
     directionCorrect,
+  };
+}
+
+/**
+ * Evaluates a single child stroke against an expected template stroke (WP4 per-stroke checking).
+ */
+export function evaluateStrokeAgainstTemplate(
+  template: NormalizedStrokeTemplate,
+  childPoints: NormalizedPoint[],
+  mode: HandwritingMode = 'trace',
+  thresholds: ScoringThresholds = DEFAULT_BEGINNER_THRESHOLDS
+): StrokeEvaluationDetail {
+  const coverageRadius =
+    mode === 'trace' ? thresholds.coverageRadiusTrace : thresholds.coverageRadiusWrite;
+  const detail = evaluateSingleStroke(childPoints, template, coverageRadius, thresholds);
+  return {
+    ...detail,
+    matched: detail.matched && detail.directionCorrect,
   };
 }
 
