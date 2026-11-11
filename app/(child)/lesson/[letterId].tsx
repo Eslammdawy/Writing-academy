@@ -1,12 +1,12 @@
 import { useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withDelay,
-  withSequence,
   withSpring,
+  withTiming,
 } from 'react-native-reanimated';
 import {
   MascotBanner,
@@ -64,6 +64,13 @@ export default function GuidedLessonScreen() {
     key: number;
   } | null>(null);
   const [watchReplayCounter, setWatchReplayCounter] = useState(0);
+  const [reduceMotion, setReduceMotion] = useState(false);
+
+  useEffect(() => {
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((enabled) => setReduceMotion(Boolean(enabled)))
+      .catch(() => {});
+  }, []);
 
   const sessionStartRef = useRef<number>(Date.now());
   const outcomeSavedRef = useRef<boolean>(false);
@@ -149,9 +156,15 @@ export default function GuidedLessonScreen() {
         language: uiLang,
       });
 
-      star1Scale.value = withSpring(1.15);
-      star2Scale.value = withDelay(180, withSpring(state.starsEarned >= 2 ? 1.2 : 0.85));
-      star3Scale.value = withDelay(360, withSpring(state.starsEarned >= 3 ? 1.25 : 0.85));
+      if (reduceMotion) {
+        star1Scale.value = withTiming(1, { duration: 150 });
+        star2Scale.value = withTiming(state.starsEarned >= 2 ? 1 : 0.85, { duration: 150 });
+        star3Scale.value = withTiming(state.starsEarned >= 3 ? 1 : 0.85, { duration: 150 });
+      } else {
+        star1Scale.value = withSpring(1.15);
+        star2Scale.value = withDelay(180, withSpring(state.starsEarned >= 2 ? 1.2 : 0.85));
+        star3Scale.value = withDelay(360, withSpring(state.starsEarned >= 3 ? 1.25 : 0.85));
+      }
 
       if (!outcomeSavedRef.current) {
         outcomeSavedRef.current = true;
@@ -209,6 +222,7 @@ export default function GuidedLessonScreen() {
     star1Scale,
     star2Scale,
     star3Scale,
+    reduceMotion,
   ]);
 
   // WP4 Idle help ladder (6s pulse -> 12s stroke demo -> 25s fail-soft escalation)

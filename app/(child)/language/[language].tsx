@@ -115,7 +115,7 @@ export default function LanguageHubScreen() {
           emoji="🎨"
           label={isAr ? 'ابدأ الدرس' : 'Start Lesson'}
           color={worldColor}
-          onPress={() => nav.push(`/(child)/letter/${hubStats.recommended.id}`)}
+          onPress={() => nav.push(`/(child)/lesson/${hubStats.recommended.id}`)}
         />
       </View>
 

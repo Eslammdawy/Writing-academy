@@ -1,7 +1,7 @@
 # Soufy & Nadine — Playful Arabic + English Handwriting Academy
 **نتعلم الكتابة ونلعب معًا**
 
-A tablet-first, 100% offline-capable React Native + Expo + TypeScript educational application for children aged 5–6 to recognize, pronounce, trace, and independently write all **26 English letters (A–Z, uppercase & lowercase)** and all **28 Arabic letters (أ–ي, isolated, initial, medial, and final positional forms + Harakat)**, build words, and play five interactive learning games.
+A tablet-first, 100% offline-capable React Native + Expo + TypeScript educational application designed so a **5–6 year old child can launch and play independently without an adult sitting next to them**, while learning to recognize, pronounce, trace, and independently write all **26 English letters (A–Z, uppercase & lowercase)** and all **28 Arabic letters (أ–ي, isolated, initial, medial, and final positional forms + Harakat)**, build words, and play five interactive learning games.
 
 ---
 
@@ -19,29 +19,60 @@ A tablet-first, 100% offline-capable React Native + Expo + TypeScript educationa
 
 ---
 
-## 2. Architecture & Key Technical Decisions
+## 2. Independent Child Mode (Guided Mode vs. Explore Mode)
 
-1. **Handwriting Rendering Engine (`react-native-svg` + `PanResponder` + Gesture Handler)**:
-   - Selected as the primary rendering engine for deterministic SVG path geometry, smooth quadratic Bezier interpolation, dashed/numbered stroke guides, animated `WATCH` demonstrations, and zero C++ native build friction on EAS Build.
-2. **Deterministic Handwriting Evaluator (`src/services/scoring/handwritingEvaluator.ts`, `v1.0.0-deterministic`)**:
-   - Evaluates normalized `[0..1]` stroke paths across path coverage, shape similarity, start/end accuracy, stroke direction, stroke order, and explicit **Arabic dot/hamza placement**.
-   - Distinguishes `WATCH`, `TRACE`, and `WRITE` modes and never counts guide paths as child input.
-   - Uses beginner-friendly tolerances for 5–6 year olds and provides warm bilingual encouragement without clinical or AI claims.
-3. **100% Offline Audio & Assets (`expo-audio` + `expo-speech`)**:
-   - Bundles 54 letter `.wav` files (`en_A.wav`–`en_Z.wav`, `ar_01.wav`–`ar_28.wav`), 6 celebratory UI sound effects (`tap.wav`, `sparkle.wav`, `celebrate.wav`, `gentle_hint.wav`, `rocket_launch.wav`, `star_earn.wav`), and Open Font License (OFL) fonts (`NotoSansArabic-Regular.ttf`, `Nunito-Regular.ttf`).
-4. **Local SQLite Persistence & Parent Gate (`expo-sqlite` + SHA-256 PIN Hashing)**:
-   - Seeds two isolated child profiles (**Soufy** and **Nadine**) by default.
-   - Protects parent analytics, profile management, audio settings, and progress reset behind a 4-digit PIN stored exclusively as a salted SHA-256 hash (initial PIN `1234` shown once in a first-visit parent setup hint, changeable in Parent Settings, with an adult math challenge recovery flow).
+See [`docs/DECISIONS.md`](docs/DECISIONS.md) for the complete architectural rationale.
+
+1. **≤ 2 Taps from Launch to First Pen Stroke (`S1`)**:
+   - **Welcome (`app/index.tsx`)**: Pre-highlights the active child's avatar tile (**Soufy** 🦊 or **Nadine** 🦉) and speaks `welcome.chooseAvatar`. One tap opens Home.
+   - **Home (`app/(child)/home.tsx`)**: Displays **Today's Adventure** (a visual star trail of 3 daily letters + 1 mini-game), a simple visual world switch (`🔤 A B C` / `🕌 أ ب ت`), one giant **`Play ⭐`** button (`minHeight: 112 dp`), and 3 icon-only buttons (`🔤` Letters, `🎮` Games, `🏆` My Stars).
+   - Parents can optionally enable **Explore Mode Shortcuts** in Parent Settings (`app/(parent)/settings.tsx`) to reveal direct Language World, Word Builder, and Progress Map cards on Home.
+2. **Self-Driving Guided Lesson (`app/(child)/lesson/[letterId].tsx`, `S2`)**:
+   - Runs a deterministic state machine (`src/features/lesson/lessonMachine.ts`):
+     - **English**: `INTRO → [Uppercase: WATCH → TRACE → WRITE] → [Lowercase: WATCH → TRACE → WRITE] → CELEBRATE → DONE`.
+     - **Arabic**: `INTRO → [Isolated: WATCH → TRACE → WRITE] → CELEBRATE → DONE`.
+   - **Per-stroke evaluation on finger-up** in `TRACE` mode: completed strokes lock in bright green; off-path or reversed strokes shake and fade out automatically so the child can immediately try again without tapping Undo or Clear.
+   - **Auto-evaluation** in `WRITE` mode (~1.2 s after lifting the finger on the final stroke, plus a large `✓` icon button).
+   - **Idle Help Ladder (`src/features/lesson/useIdleHint.ts`)**: `6 s` pulses the start star `★` + speaks a friendly hint; `12 s` replays the current stroke animation in-place; `25 s` escalates through the fail-soft ladder.
+   - **Fail-Soft Ladder (`S4`)**: 2 consecutive failed attempts return to a slower `WATCH` demo and widen tracing tolerances (`WIDE_ASSISTED_THRESHOLDS`); a 3rd failed attempt triggers `GENTLE_SKIP`, awarding **1 effort star**, flagging `needsHelp = true` for the parent dashboard, and advancing to the next activity.
+3. **Voice-First Bilingual Narrator (`src/services/audio/narrator.ts`, `S3`)**:
+   - Every child screen speaks its instructions automatically in a single language (`en` or gender-neutral `ar`) via a sequential non-overlapping queue.
+   - Tapping the mascot banner (`MascotBanner`) or speaker icon (`🔊`) on any child screen repeats the last spoken instruction (`narrator.repeat()`).
+4. **Honest Game & Word Builder Scoring (`src/features/games/gameScoring.ts`, `S6`)**:
+   - *Write to Launch* and *Complete the Monster* evaluate actual strokes against curriculum templates (random scribbles fail and prompt a friendly retry).
+   - First-visit games play a ~2.5 s visual "How to Play" hand-hint animation (`👆`) and auto-speak the target prompt on every round.
+   - Stored scores, stars, and session durations reflect real accuracy and elapsed time.
+5. **Hardened Parent Gate & Forward-Only SQLite Schema v2 (`S5`, `WP7`, `WP8`)**:
+   - Child screens contain zero destructive or settings controls; reaching the Parent Gate requires pressing and holding `🔒` for ~2 seconds (`delayLongPress={1800}`).
+   - First-visit parent setup prompts the parent to **create and confirm a 4-digit PIN** (no printed default PIN on screen) and uses a randomized adult arithmetic challenge (`generateAdultMathChallenge`) for PIN recovery.
+   - Upgrades existing SQLite databases forward-only from `v1` to `SCHEMA_VERSION = 2` via `runForwardMigrations()` without losing child data.
 
 ---
 
-## 3. Local Development & Testing Commands
+## 3. Recommended Android Tablet Setup for Unsupervised Child Use
+
+To let a 5–6 year old use the tablet independently without accidentally leaving the app or missing spoken instructions:
+
+### A. Enable Android Screen Pinning (Kiosk Lock)
+While the app already intercepts the Android hardware Back button on Welcome and Home with a friendly *"Ask a grown-up"* prompt, Android OS **Screen Pinning** prevents the Home or Overview gestures from switching apps:
+1. On your Android tablet, open **Settings → Security & privacy → More security settings → App pinning** (or **Screen pinning**) and turn it **ON**.
+2. Enable **"Ask for PIN before unpinning"**.
+3. Launch **Soufy & Nadine**, open the Android Recent Apps overview, tap the app icon at the top of the card, and tap **Pin**.
+
+### B. Verify Offline English & Arabic TTS Voices
+1. Open **Parent Gate** (press and hold `🔒` for 2 seconds) → **Settings & Reset**.
+2. Check the **Offline TTS Voice Status** card (`English Voice` and `Arabic Voice`) and tap **Test English Voice** / **Test Arabic Voice**.
+3. If either voice shows `Missing ⚠️`, open Android **Settings → Accessibility → Text-to-speech output → ⚙️ (Preferred engine) → Install voice data**, and download **English (United States)** and **Arabic** for 100% offline speech in Airplane Mode.
+
+---
+
+## 4. Local Development & Testing Commands
 
 ```bash
 # 1. Install dependencies
 npm install
 
-# 2. Run automated Jest unit & integration tests
+# 2. Run automated Jest unit & integration tests (29 test suites/cases)
 npm test
 
 # 3. Run TypeScript strict typecheck
@@ -56,32 +87,14 @@ npx expo start
 
 ---
 
-## 4. Building the Signed Android APK with EAS
+## 5. Building & Installing the Signed Android APK
 
-The project root includes `eas.json` and `app.json` configured according to `config.md` so the `preview` and `production-apk` profiles output a directly installable `.apk` (`"buildType": "apk"`).
+The project root includes `eas.json` and `app.json` configured so the `preview` and `production-apk` profiles output a directly installable `.apk` (`"buildType": "apk"`).
 
 ```bash
-# 1. Authenticate with your Expo account
-npx eas-cli login
-
-# 2. Configure EAS project (if linking for the first time)
-npx eas-cli build:configure
-
-# 3. Trigger the signed Android APK build
+# Trigger the signed Android APK build on EAS
 npx eas-cli build --platform android --profile preview
-```
 
----
-
-## 5. Installing the APK on an Android Tablet
-
-### Option A — Direct Download on the Tablet
-1. Open the EAS Build artifact link on your Android tablet.
-2. Download the `.apk` file.
-3. Tap the downloaded `.apk` and allow installation from your browser/files app if prompted by Android.
-4. Launch **Soufy & Nadine** — all lessons, audio, handwriting studio modes, and games work offline (including in Airplane Mode).
-
-### Option B — Install via ADB from a Computer
-```bash
+# Or install an existing APK via ADB
 adb install -r path/to/soufy-and-nadine.apk
 ```
