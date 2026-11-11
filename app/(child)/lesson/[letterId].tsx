@@ -288,6 +288,17 @@ export default function GuidedLessonScreen() {
     [state.phase, state.consecutiveFails, registerActivity]
   );
 
+  // Stable identity so the canvas never re-wires its touch handling mid-lesson.
+  const isWritePhase = state.phase === 'WRITE';
+  const handleCanvasStrokesChange = useCallback(
+    (next: RecordedStroke[]) => {
+      if (isWritePhase) {
+        setLocalWriteStrokes(next);
+      }
+    },
+    [isWritePhase]
+  );
+
   // "Show me" 👀 button replays the current stroke demo in-place without switching modes (WP9)
   const handleShowMeInPlace = () => {
     registerActivity();
@@ -406,11 +417,7 @@ export default function GuidedLessonScreen() {
             recordedStrokes={
               state.phase === 'TRACE' ? state.tracedStrokes : localWriteStrokes
             }
-            onStrokesChange={(next) => {
-              if (state.phase === 'WRITE') {
-                setLocalWriteStrokes(next);
-              }
-            }}
+            onStrokesChange={handleCanvasStrokesChange}
             canvasSize={canvasSize}
             watchTriggerKey={watchReplayCounter}
             onWatchComplete={handleWatchComplete}

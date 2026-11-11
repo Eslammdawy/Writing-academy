@@ -3,6 +3,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 export const IDLE_PULSE_MS = 6000;
 export const IDLE_DEMO_MS = 12000;
 export const IDLE_STUCK_MS = 25000;
+/** While the finger keeps moving, the ladder is re-armed at most this often. */
+export const ACTIVITY_RESET_THROTTLE_MS = 500;
+
+/** What kind of touch activity happened on the canvas. Only `move` is throttled. */
+export type TouchActivityKind = 'grant' | 'move' | 'release';
 
 export interface IdleHintCallbacks {
   /** Fired at 6s idle: pulse the start badge and speak `lesson.idle` */
@@ -22,8 +27,12 @@ export class IdleHintScheduler {
   private demoTimer: ReturnType<typeof setTimeout> | null = null;
   private stuckTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
+  private lastResetAt = 0;
 
-  constructor(private readonly callbacks: IdleHintCallbacks) {}
+  constructor(
+    private readonly callbacks: IdleHintCallbacks,
+    private readonly minResetIntervalMs: number = ACTIVITY_RESET_THROTTLE_MS
+  ) {}
 
   start(): void {
     this.stop();
@@ -31,10 +40,22 @@ export class IdleHintScheduler {
     this.scheduleTimers();
   }
 
+  /** Unconditionally re-arms the ladder (touch grant/release, button taps). */
   resetActivity(): void {
     if (!this.active) return;
     this.clearTimers();
     this.scheduleTimers();
+  }
+
+  /**
+   * Throttled re-arm for high-frequency activity (touch-move). Re-schedules the
+   * timers at most once per `minResetIntervalMs`. Returns true if it re-armed.
+   */
+  noteActivity(): boolean {
+    if (!this.active) return false;
+    if (Date.now() - this.lastResetAt < this.minResetIntervalMs) return false;
+    this.resetActivity();
+    return true;
   }
 
   stop(): void {
@@ -58,6 +79,7 @@ export class IdleHintScheduler {
   }
 
   private scheduleTimers(): void {
+    this.lastResetAt = Date.now();
     this.pulseTimer = setTimeout(() => {
       if (!this.active) return;
       this.callbacks.onPulseHint();
@@ -85,6 +107,12 @@ export function useIdleHint(options: {
   onStuck: () => void;
 }) {
   const [pulseStartBadge, setPulseStartBadge] = useState(false);
+  /** Mirrors `pulseStartBadge` synchronously so activity can skip no-op state updates. */
+  const pulseRef = useRef(false);
+  const setPulse = (value: boolean) => {
+    pulseRef.current = value;
+    setPulseStartBadge(value);
+  };
   const callbacksRef = useRef(options);
   callbacksRef.current = options;
 
@@ -93,14 +121,14 @@ export function useIdleHint(options: {
   if (!schedulerRef.current) {
     schedulerRef.current = new IdleHintScheduler({
       onPulseHint: () => {
-        setPulseStartBadge(true);
+        setPulse(true);
         callbacksRef.current.onPulseHint();
       },
       onReplayStrokeDemo: () => {
         callbacksRef.current.onReplayStrokeDemo();
       },
       onStuck: () => {
-        setPulseStartBadge(false);
+        setPulse(false);
         callbacksRef.current.onStuck();
       },
     });
@@ -109,10 +137,10 @@ export function useIdleHint(options: {
   useEffect(() => {
     const scheduler = schedulerRef.current!;
     if (options.enabled) {
-      setPulseStartBadge(false);
+      setPulse(false);
       scheduler.start();
     } else {
-      setPulseStartBadge(false);
+      setPulse(false);
       scheduler.stop();
     }
     return () => {
@@ -120,9 +148,20 @@ export function useIdleHint(options: {
     };
   }, [options.enabled]);
 
-  const registerActivity = useCallback(() => {
-    setPulseStartBadge(false);
-    schedulerRef.current?.resetActivity();
+  /**
+   * Call on any child activity. Touch-move (`kind === 'move'`) is throttled so a
+   * long stroke does not clear/re-create the 3 ladder timers on every event;
+   * everything else (grant, release, button taps) re-arms immediately.
+   */
+  const registerActivity = useCallback((kind?: TouchActivityKind) => {
+    if (pulseRef.current) {
+      setPulse(false);
+    }
+    if (kind === 'move') {
+      schedulerRef.current?.noteActivity();
+    } else {
+      schedulerRef.current?.resetActivity();
+    }
   }, []);
 
   return {

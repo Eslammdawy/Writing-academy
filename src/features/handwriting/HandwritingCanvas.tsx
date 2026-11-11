@@ -34,6 +34,7 @@ import {
   MAX_STROKE_POINTS,
   pointsToSvgPath,
 } from './inkGeometry';
+import type { TouchActivityKind } from '../lesson/useIdleHint';
 
 // Re-exported for backwards compatibility with existing imports.
 export { pointsToSvgPath };
@@ -63,8 +64,11 @@ export interface HandwritingCanvasProps {
   /** Auto-evaluate in WRITE mode after pen-up when strokes >= template count */
   onAutoEvaluateWrite?: (strokes: RecordedStroke[]) => void;
   autoEvaluateWriteMs?: number;
-  /** Called whenever the child touches, moves, or lifts on the canvas (resets idle ladder) */
-  onTouchActivity?: () => void;
+  /**
+   * Called whenever the child touches, moves, or lifts on the canvas (resets idle ladder).
+   * `kind` lets the receiver throttle high-frequency `move` events.
+   */
+  onTouchActivity?: (kind?: TouchActivityKind) => void;
   /** Pulses the starting star badge (6s idle hint) */
   pulseStartBadge?: boolean;
   /** Replays the animated star demo for a single stroke in-place without switching mode */
@@ -157,6 +161,10 @@ export const HandwritingCanvas: React.FC<HandwritingCanvasProps> = ({
 
   const thresholdsRef = useRef<ScoringThresholds>(thresholds);
   thresholdsRef.current = thresholds;
+
+  // Routed through a ref so an inline parent callback never recreates the PanResponder.
+  const onStrokesChangeRef = useRef(onStrokesChange);
+  onStrokesChangeRef.current = onStrokesChange;
 
   const onTraceStrokeResultRef = useRef(onTraceStrokeResult);
   onTraceStrokeResultRef.current = onTraceStrokeResult;
@@ -279,7 +287,7 @@ export const HandwritingCanvas: React.FC<HandwritingCanvasProps> = ({
 
         if (detail.matched) {
           const nextStrokes = [...strokesRef.current, newStroke];
-          onStrokesChange(nextStrokes);
+          onStrokesChangeRef.current(nextStrokes);
           const completedAllStrokes = nextStrokes.length >= remainingTemplateIndices.length;
           onTraceStrokeResultRef.current?.({
             passed: true,
@@ -303,7 +311,7 @@ export const HandwritingCanvas: React.FC<HandwritingCanvasProps> = ({
       }
     }
 
-    onStrokesChange([...strokesRef.current, newStroke]);
+    onStrokesChangeRef.current([...strokesRef.current, newStroke]);
   };
 
   const panResponder = useMemo(
@@ -328,7 +336,7 @@ export const HandwritingCanvas: React.FC<HandwritingCanvasProps> = ({
         onPanResponderGrant: (evt) => {
           if (mode === 'watch') return;
           if (isLikelyPalmTouch(evt.nativeEvent)) return;
-          onTouchActivityRef.current?.();
+          onTouchActivityRef.current?.('grant');
           setInlineDemo(null);
           const { locationX, locationY } = evt.nativeEvent;
           const pt: NormalizedPoint = {
@@ -348,7 +356,7 @@ export const HandwritingCanvas: React.FC<HandwritingCanvasProps> = ({
           const touches = evt.nativeEvent.touches;
           if (touches && touches.length > 1) return;
           if (isLikelyPalmTouch(evt.nativeEvent)) return;
-          onTouchActivityRef.current?.();
+          onTouchActivityRef.current?.('move');
           const { locationX, locationY } = evt.nativeEvent;
           const pt: NormalizedPoint = {
             x: clampNormalized(locationX),
@@ -364,7 +372,7 @@ export const HandwritingCanvas: React.FC<HandwritingCanvasProps> = ({
         },
         onPanResponderRelease: () => {
           if (mode === 'watch') return;
-          onTouchActivityRef.current?.();
+          onTouchActivityRef.current?.('release');
           finalizeStroke(activePointsRef.current);
         },
         onPanResponderTerminate: () => {
@@ -372,8 +380,8 @@ export const HandwritingCanvas: React.FC<HandwritingCanvasProps> = ({
           finalizeStroke(activePointsRef.current);
         },
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mode, canvasSize, onStrokesChange]
+    // Created once per (mode, canvasSize); every callback is read through a ref.
+    [mode, canvasSize]
   );
 
   const strokeWidthGuide = Math.max(18, canvasSize * 0.062);
