@@ -171,6 +171,8 @@ export interface LearningProgressRecord {
   successfulAttempts: number;
   masteryStatus: MasteryStatus;
   lastPracticed: string | null;
+  needsHelp?: boolean;
+  consecutiveFails?: number;
 }
 
 export interface PracticeSessionRecord {
@@ -224,6 +226,8 @@ export interface ParentSettingsRecord {
   audioEnabled: boolean;
   narrationEnabled: boolean;
   soundEffectsVolume: number;
+  guidedMode?: boolean;
+  exploreMode?: boolean;
 }
 
 export type GameId =

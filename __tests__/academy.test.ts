@@ -29,6 +29,10 @@ import {
   IDLE_STUCK_MS,
   IdleHintScheduler,
 } from '../src/features/lesson/useIdleHint';
+import {
+  buildTodaysMission,
+  evaluateDailySessionBreak,
+} from '../src/features/mission/missionPlanner';
 import { RecordedStroke } from '../src/types';
 import {
   DEFAULT_PARENT_PIN,
@@ -578,5 +582,82 @@ describe('5. Core Lesson Machine, Per-Stroke Evaluation, Idle & Fail-Soft Ladder
 
     state = lessonReducer(state, { type: 'GENTLE_SKIP_COMPLETE' });
     expect(state.phase).toBe('DONE');
+  });
+});
+
+describe('6. Today’s Adventure Mission Planner & Session Break Suggestion (Phase 3)', () => {
+  test('buildTodaysMission prioritizes practicing/learning letters before new letters and appends 1 chained game', async () => {
+    const repo = new LocalAcademyRepository(true);
+    await repo.initialize();
+
+    const progressMap = await repo.getProgressForChild('child_soufy');
+    // Mark en_C as practicing (yesterday) so it should appear first in Today's Adventure
+    progressMap['en_C'] = {
+      ...progressMap['en_C'],
+      attempts: 2,
+      successfulAttempts: 1,
+      tracingScore: 72,
+      masteryStatus: 'practicing',
+      lastPracticed: '2026-11-10T10:00:00.000Z',
+    };
+
+    const refDate = new Date(2026, 10, 11, 12, 0, 0);
+    const plan = buildTodaysMission({
+      language: 'en',
+      progressMap,
+      dailyGoalLetters: 3,
+      referenceDate: refDate,
+    });
+
+    expect(plan.steps).toHaveLength(4); // 3 letters + 1 game
+    expect(plan.steps[0].letterId).toBe('en_C'); // practicing letter prioritized first
+    expect(plan.steps[1].letterId).toBe('en_A'); // first new letter
+    expect(plan.steps[2].letterId).toBe('en_B'); // second new letter
+    expect(plan.steps[3].type).toBe('game');
+    expect(plan.steps[0].href).toContain('/(child)/lesson/en_C');
+    expect(plan.steps[0].href).toContain('nextHref=');
+    expect(plan.isAllDone).toBe(false);
+    expect(plan.nextActiveStep.id).toBe('en_C');
+  });
+
+  test('evaluateDailySessionBreak suggests a non-blocking break when dailyGoalMinutes is reached', () => {
+    const refDate = new Date(2026, 10, 11, 14, 0, 0);
+    const sessions = [
+      {
+        id: 's1',
+        childId: 'child_soufy',
+        language: 'en' as const,
+        sessionDate: refDate.toISOString(),
+        durationSeconds: 320,
+        score: 88,
+      },
+      {
+        id: 's2',
+        childId: 'child_soufy',
+        language: 'en' as const,
+        sessionDate: refDate.toISOString(),
+        durationSeconds: 300,
+        score: 91,
+      },
+    ];
+
+    const res = evaluateDailySessionBreak({
+      sessions,
+      dailyGoalMinutes: 10,
+      dismissedBreakToday: false,
+      referenceDate: refDate,
+    });
+
+    expect(res.todaySeconds).toBe(620);
+    expect(res.shouldSuggestBreak).toBe(true);
+
+    // Dismissing break suppresses suggestion so the session is never locked
+    const dismissedRes = evaluateDailySessionBreak({
+      sessions,
+      dailyGoalMinutes: 10,
+      dismissedBreakToday: true,
+      referenceDate: refDate,
+    });
+    expect(dismissedRes.shouldSuggestBreak).toBe(false);
   });
 });

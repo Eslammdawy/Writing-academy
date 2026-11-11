@@ -49,11 +49,18 @@ export default function ChildProgressJourneyScreen() {
     };
   }, [progressMap, sessions]);
 
+  const isAr = activeChild.preferredLanguage === 'ar';
+
   return (
     <ScreenContainer>
       <TopAdventureHeader
-        title={`${activeChild.name}'s Learning Journey • رحلتي`}
-        subtitle="Look at all the letters you have explored!"
+        title={isAr ? `رحلة ${activeChild.name}` : `${activeChild.name}'s Journey`}
+        subtitle={
+          isAr
+            ? 'انظر إلى جميع الحروف التي استكشفناها!'
+            : 'Look at all the letters you have explored!'
+        }
+        language={activeChild.preferredLanguage}
         childName={activeChild.name}
         childAvatar={activeChild.avatar}
         starsCount={activeChild.starsCount}
@@ -63,8 +70,17 @@ export default function ChildProgressJourneyScreen() {
 
       <MascotBanner
         mascotEmoji="🗺️🦉"
-        title={`Today's Fun Time: ${summary.todayMinutes} min • وقت التدريب اليوم: ${summary.todayMinutes} دقيقة`}
-        message={`Stars earned: ${activeChild.starsCount} ⭐ • English: ${summary.enLearned.length}/26 • العربية: ${summary.arLearned.length}/28`}
+        title={
+          isAr
+            ? `وقت التدريب اليوم: ${summary.todayMinutes} دقيقة`
+            : `Today's Fun Time: ${summary.todayMinutes} min`
+        }
+        message={
+          isAr
+            ? `النجوم: ${activeChild.starsCount} ⭐ • العربية: ${summary.arLearned.length}/28 • الإنجليزية: ${summary.enLearned.length}/26`
+            : `Stars: ${activeChild.starsCount} ⭐ • English: ${summary.enLearned.length}/26 • Arabic: ${summary.arLearned.length}/28`
+        }
+        isRtl={isAr}
         color={COLORS.surfaceMint}
       />
 

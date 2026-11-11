@@ -1,137 +1,125 @@
-import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { PlayfulButton, ScreenContainer } from '../src/components/PlayfulUI';
+import { ScreenContainer } from '../src/components/PlayfulUI';
 import { useAppState } from '../src/context/AppStateContext';
+import { AVATAR_CATALOG } from '../src/data/curriculum';
+import { useSafeNavigate } from '../src/hooks/useSafeNavigate';
 import { useTabletLayout } from '../src/hooks/useTabletLayout';
 import { audioService } from '../src/services/audio/audioService';
+import { narrator } from '../src/services/audio/narrator';
 import { COLORS, RADIUS, SHADOWS, SPACING } from '../src/theme/tokens';
 
 export default function WelcomeSplashScreen() {
-  const router = useRouter();
+  const nav = useSafeNavigate();
   const { isLandscape } = useTabletLayout();
-  const { activeChild } = useAppState();
-  const [floatStep, setFloatStep] = useState(0);
+  const { childrenProfiles, activeChild, selectChild, isReady } = useAppState();
+  const isAr = activeChild.preferredLanguage === 'ar';
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setFloatStep((s) => (s + 1) % 2);
-    }, 900);
-    return () => clearInterval(timer);
-  }, []);
+    if (!isReady) return;
+    narrator.say(
+      'welcome.chooseAvatar',
+      { name: activeChild.name },
+      { language: activeChild.preferredLanguage }
+    );
+  }, [isReady, activeChild.id, activeChild.name, activeChild.preferredLanguage]);
+
+  const handleSelectAvatarTile = async (childId: string) => {
+    audioService.playSoundEffect('celebrate');
+    await selectChild(childId);
+    nav.replace('/(child)/home');
+  };
 
   return (
-    <ScreenContainer backgroundColor={COLORS.background}>
-      {/* Discreet Parent Gate entry in top corner */}
+    <ScreenContainer scroll={false} backgroundColor={COLORS.background}>
+      {/* Discreet Parent Gate entry in top corner (long-press or tap per WP7) */}
       <View style={styles.topUtilityBar}>
-        <View style={styles.offlineBadge}>
-          <Text style={styles.offlineDot}>●</Text>
-          <Text style={styles.offlineText}>100% Offline Ready • جاهز بدون إنترنت</Text>
-        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Repeat welcome voice"
+          onPress={() => {
+            audioService.playSoundEffect('tap');
+            narrator.repeat();
+          }}
+          style={styles.speakerUtilityBtn}
+        >
+          <Text style={styles.speakerUtilityIcon}>🔊</Text>
+        </Pressable>
 
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Parent Area"
-          onPress={() => {
+          accessibilityLabel="Parent Gate (Hold for 2 seconds)"
+          delayLongPress={1800}
+          onLongPress={() => {
             audioService.playSoundEffect('tap');
-            router.push('/(parent)/pin');
+            nav.push('/(parent)/pin');
           }}
           style={styles.parentEntryBtn}
         >
           <Text style={styles.parentEntryIcon}>🔒</Text>
-          <Text style={styles.parentEntryText}>Parents • للوالدين</Text>
         </Pressable>
       </View>
 
-      <View style={[styles.heroContainer, isLandscape && styles.heroContainerLandscape]}>
-        {/* Left/Top: Floating Alphabet Adventure Illustration */}
-        <View style={styles.illustrationCard}>
-          <View style={styles.floatingLettersRow}>
-            <View
-              style={[
-                styles.floatingBubble,
-                {
-                  backgroundColor: COLORS.skyBlueLight,
-                  transform: [{ translateY: floatStep === 0 ? -6 : 4 }],
-                },
-              ]}
-            >
-              <Text style={[styles.floatingLetterText, { color: COLORS.skyBlueDark }]}>A a</Text>
-            </View>
-            <View
-              style={[
-                styles.floatingBubble,
-                {
-                  backgroundColor: COLORS.mintGreenLight,
-                  transform: [{ translateY: floatStep === 1 ? -6 : 4 }],
-                },
-              ]}
-            >
-              <Text style={[styles.floatingLetterText, { color: COLORS.mintGreenDark }]}>أ ب</Text>
-            </View>
-            <View
-              style={[
-                styles.floatingBubble,
-                {
-                  backgroundColor: COLORS.sunshineYellowLight,
-                  transform: [{ translateY: floatStep === 0 ? 4 : -6 }],
-                },
-              ]}
-            >
-              <Text style={[styles.floatingLetterText, { color: COLORS.sunshineYellowDark }]}>
-                B ت
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.mascotStage}>
-            <View style={[styles.mascotCircle, { backgroundColor: COLORS.coralOrangeLight }]}>
-              <Text style={styles.mascotHeroEmoji}>🦊</Text>
-              <Text style={styles.mascotTag}>Soufy</Text>
-            </View>
-            <Text style={styles.sparkleCenter}>✨🎨✨</Text>
-            <View style={[styles.mascotCircle, { backgroundColor: COLORS.lavenderPurpleLight }]}>
-              <Text style={styles.mascotHeroEmoji}>🦉</Text>
-              <Text style={styles.mascotTag}>Nadine</Text>
-            </View>
-          </View>
+      <View style={styles.centerStage}>
+        {/* Brand Mascots Header */}
+        <View style={styles.mascotRow}>
+          <Text style={styles.mascotEmoji}>🦊</Text>
+          <Text style={styles.brandTitle}>
+            {isAr ? 'صوفي ونادين' : 'Soufy & Nadine'}
+          </Text>
+          <Text style={styles.mascotEmoji}>🦉</Text>
         </View>
 
-        {/* Right/Bottom: Brand Title & Big Play Action */}
-        <View style={styles.brandPanel}>
-          <Text style={styles.titleEn}>Soufy & Nadine</Text>
-          <Text style={styles.subtitleAr}>نتعلم الكتابة ونلعب معًا</Text>
-          <Text style={styles.taglineEn}>
-            Playful Arabic & English Handwriting Academy
-          </Text>
+        {/* Avatar-only tiles (last active child pre-highlighted; 1 tap to Home) */}
+        <View style={[styles.avatarTilesRow, isLandscape && styles.avatarTilesLandscape]}>
+          {childrenProfiles.map((profile) => {
+            const isHighlighted = profile.id === activeChild.id;
+            const avatarDef =
+              AVATAR_CATALOG.find((a) => a.id === profile.avatar) ?? AVATAR_CATALOG[0];
 
-          <View style={styles.ctaGroup}>
-            <PlayfulButton
-              emoji="🚀"
-              label="Let's Play & Learn!"
-              sublabel="يلا نتعلم ونلعب"
-              color={COLORS.mintGreen}
-              minHeight={76}
-              onPress={() => {
-                audioService.playSoundEffect('celebrate');
-                router.push('/(child)/profiles');
-              }}
-              style={styles.mainCta}
-            />
+            return (
+              <Pressable
+                key={profile.id}
+                accessibilityRole="button"
+                accessibilityLabel={profile.name}
+                onPress={() => handleSelectAvatarTile(profile.id)}
+                style={({ pressed }) => [
+                  styles.avatarTile,
+                  SHADOWS.card,
+                  {
+                    borderColor: isHighlighted
+                      ? COLORS.sunshineYellow
+                      : avatarDef.accentColor,
+                    borderWidth: isHighlighted ? 6 : 3.5,
+                    backgroundColor: isHighlighted ? '#FFFFFF' : COLORS.surfaceSoft,
+                    transform: [{ scale: pressed ? 0.96 : isHighlighted ? 1.03 : 1 }],
+                  },
+                ]}
+              >
+                {isHighlighted ? (
+                  <View style={styles.preHighlightCrown}>
+                    <Text style={styles.crownEmoji}>⭐</Text>
+                  </View>
+                ) : null}
 
-            <PlayfulButton
-              emoji="🗺️"
-              label={`Continue as ${activeChild.name}`}
-              sublabel={`المتابعة باسم ${activeChild.name}`}
-              color={COLORS.skyBlue}
-              variant="soft"
-              minHeight={64}
-              onPress={() => {
-                router.push('/(child)/home');
-              }}
-              style={styles.secondaryCta}
-            />
-          </View>
+                <View
+                  style={[
+                    styles.avatarFaceCircle,
+                    { backgroundColor: avatarDef.bgColor },
+                  ]}
+                >
+                  <Text style={styles.avatarFaceEmoji}>{avatarDef.emoji}</Text>
+                </View>
+
+                <Text style={styles.avatarTileName}>{profile.name}</Text>
+
+                <View style={styles.starsBadge}>
+                  <Text style={styles.starsBadgeEmoji}>⭐</Text>
+                  <Text style={styles.starsBadgeCount}>{profile.starsCount}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
         </View>
       </View>
     </ScreenContainer>
@@ -143,148 +131,125 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: SPACING.md,
   },
-  offlineBadge: {
-    flexDirection: 'row',
+  speakerUtilityBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: COLORS.skyBlueLight,
     alignItems: 'center',
-    backgroundColor: COLORS.mintGreenLight,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: 8,
-    borderRadius: RADIUS.pill,
-    gap: 6,
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: COLORS.skyBlue,
   },
-  offlineDot: {
-    color: COLORS.mintGreenDark,
-    fontSize: 14,
-  },
-  offlineText: {
-    color: COLORS.mintGreenDark,
-    fontSize: 13,
-    fontWeight: '800',
+  speakerUtilityIcon: {
+    fontSize: 28,
   },
   parentEntryBtn: {
-    flexDirection: 'row',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: COLORS.surface,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: 10,
-    borderRadius: RADIUS.pill,
     borderWidth: 1.5,
     borderColor: COLORS.borderCard,
-    gap: 6,
+    opacity: 0.75,
   },
   parentEntryIcon: {
-    fontSize: 15,
+    fontSize: 22,
   },
-  parentEntryText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.textSecondary,
-  },
-  heroContainer: {
+  centerStage: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: SPACING.xl,
-    paddingVertical: SPACING.md,
   },
-  heroContainerLandscape: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  illustrationCard: {
-    flex: 1,
-    maxWidth: 500,
-    width: '100%',
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.xl,
-    padding: SPACING.xl,
-    alignItems: 'center',
-    borderWidth: 3,
-    borderColor: COLORS.skyBlueLight,
-    ...SHADOWS.card,
-  },
-  floatingLettersRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: SPACING.md,
-    marginBottom: SPACING.lg,
-  },
-  floatingBubble: {
-    width: 82,
-    height: 82,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  floatingLetterText: {
-    fontSize: 28,
-    fontWeight: '900',
-  },
-  mascotStage: {
+  mascotRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: SPACING.md,
   },
-  mascotCircle: {
-    width: 118,
-    height: 118,
-    borderRadius: 59,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: COLORS.surface,
+  mascotEmoji: {
+    fontSize: 48,
   },
-  mascotHeroEmoji: {
-    fontSize: 52,
-  },
-  mascotTag: {
-    fontSize: 15,
+  brandTitle: {
+    fontSize: 42,
     fontWeight: '900',
     color: COLORS.textPrimary,
-    marginTop: 2,
-  },
-  sparkleCenter: {
-    fontSize: 26,
-  },
-  brandPanel: {
-    flex: 1,
-    maxWidth: 520,
-    width: '100%',
-    alignItems: 'center',
-  },
-  titleEn: {
-    fontSize: 46,
-    fontWeight: '900',
-    color: COLORS.textPrimary,
-    textAlign: 'center',
-  },
-  subtitleAr: {
-    fontSize: 30,
-    fontWeight: '800',
-    color: COLORS.mintGreenDark,
-    marginTop: 6,
     textAlign: 'center',
     fontFamily: 'NotoSansArabic-Regular',
   },
-  taglineEn: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
-    marginTop: 8,
-    marginBottom: SPACING.xl,
-    textAlign: 'center',
-  },
-  ctaGroup: {
+  avatarTilesRow: {
     width: '100%',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: SPACING.xl,
+  },
+  avatarTilesLandscape: {
+    flexDirection: 'row',
+  },
+  avatarTile: {
+    minWidth: 240,
+    maxWidth: 320,
+    flex: 1,
+    borderRadius: RADIUS.xl,
+    paddingVertical: SPACING.xl,
+    paddingHorizontal: SPACING.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: SPACING.md,
+    position: 'relative',
   },
-  mainCta: {
-    width: '100%',
+  preHighlightCrown: {
+    position: 'absolute',
+    top: -18,
+    right: -12,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: COLORS.sunshineYellow,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#FFFFFF',
   },
-  secondaryCta: {
-    width: '100%',
+  crownEmoji: {
+    fontSize: 24,
+  },
+  avatarFaceCircle: {
+    width: 148,
+    height: 148,
+    borderRadius: 74,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarFaceEmoji: {
+    fontSize: 82,
+  },
+  avatarTileName: {
+    fontSize: 36,
+    fontWeight: '900',
+    color: COLORS.textPrimary,
+  },
+  starsBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.sunshineYellowLight,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: 8,
+    borderRadius: RADIUS.pill,
+    gap: 8,
+  },
+  starsBadgeEmoji: {
+    fontSize: 22,
+  },
+  starsBadgeCount: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: COLORS.sunshineYellowDark,
   },
 });

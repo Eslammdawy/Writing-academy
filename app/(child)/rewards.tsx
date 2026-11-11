@@ -14,13 +14,19 @@ export default function RewardsStickerGalleryScreen() {
   const nav = useSafeNavigate();
   const { activeChild, achievements } = useAppState();
 
+  const isAr = activeChild.preferredLanguage === 'ar';
   const unlockedTypes = new Set(achievements.map((a) => a.achievementType));
 
   return (
     <ScreenContainer>
       <TopAdventureHeader
-        title={`${activeChild.name}'s Stars & Stickers • نجومي وملصقاتي`}
-        subtitle="Collected by trying, tracing, writing, and playing!"
+        title={isAr ? `نجومي وملصقاتي` : `${activeChild.name}'s Stars & Stickers`}
+        subtitle={
+          isAr
+            ? 'ملصقات جميلة حصلنا عليها بالتدريب واللعب!'
+            : 'Collected by trying, tracing, writing, and playing!'
+        }
+        language={activeChild.preferredLanguage}
         childName={activeChild.name}
         childAvatar={activeChild.avatar}
         starsCount={activeChild.starsCount}
@@ -30,8 +36,17 @@ export default function RewardsStickerGalleryScreen() {
 
       <MascotBanner
         mascotEmoji="🏆🌟"
-        title={`You have ${activeChild.starsCount} Stars & ${achievements.length} / ${BADGE_CATALOG.length} Stickers!`}
-        message="Every time you practice a letter or play a game, your sticker book grows!"
+        title={
+          isAr
+            ? `لدينا ${activeChild.starsCount} نجمة و ${achievements.length} ملصقات!`
+            : `You have ${activeChild.starsCount} Stars & ${achievements.length} / ${BADGE_CATALOG.length} Stickers!`
+        }
+        message={
+          isAr
+            ? 'كلما تدربنا على حرف أو لعبنا لعبة يزداد ألبوم الملصقات!'
+            : 'Every time you practice a letter or play a game, your sticker book grows!'
+        }
+        isRtl={isAr}
         color={COLORS.sunshineYellowLight}
       />
 
@@ -60,8 +75,9 @@ export default function RewardsStickerGalleryScreen() {
                 <Text style={styles.badgeEmoji}>{isUnlocked ? badge.emoji : '🔒'}</Text>
               </View>
 
-              <Text style={styles.badgeTitleEn}>{badge.titleEn}</Text>
-              <Text style={styles.badgeTitleAr}>{badge.titleAr}</Text>
+              <Text style={isAr ? styles.badgeTitleAr : styles.badgeTitleEn}>
+                {isAr ? badge.titleAr : badge.titleEn}
+              </Text>
               <Text style={styles.badgeDesc}>{badge.descriptionEn}</Text>
 
               <View
@@ -80,7 +96,13 @@ export default function RewardsStickerGalleryScreen() {
                     { color: isUnlocked ? COLORS.mintGreenDark : COLORS.textMuted },
                   ]}
                 >
-                  {isUnlocked ? '✓ Collected • مكتسب' : 'Keep Exploring!'}
+                  {isUnlocked
+                    ? isAr
+                      ? '✓ مكتسب'
+                      : '✓ Collected'
+                    : isAr
+                      ? 'نكتشفه قريبًا!'
+                      : 'Keep Exploring!'}
                 </Text>
               </View>
             </View>

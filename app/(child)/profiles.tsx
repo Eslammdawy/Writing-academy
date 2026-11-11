@@ -1,44 +1,59 @@
-import { useRouter } from 'expo-router';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   MascotBanner,
-  PlayfulButton,
   ScreenContainer,
   TopAdventureHeader,
 } from '../../src/components/PlayfulUI';
 import { useAppState } from '../../src/context/AppStateContext';
 import { AVATAR_CATALOG } from '../../src/data/curriculum';
+import { useSafeNavigate } from '../../src/hooks/useSafeNavigate';
 import { useTabletLayout } from '../../src/hooks/useTabletLayout';
 import { audioService } from '../../src/services/audio/audioService';
+import { narrator } from '../../src/services/audio/narrator';
 import { COLORS, RADIUS, SHADOWS, SPACING } from '../../src/theme/tokens';
 
 export default function ChooseChildScreen() {
-  const router = useRouter();
+  const nav = useSafeNavigate();
   const { isLandscape } = useTabletLayout();
-  const { childrenProfiles, activeChild, selectChild, updateChild } = useAppState();
+  const { childrenProfiles, activeChild, selectChild } = useAppState();
+  const isAr = activeChild.preferredLanguage === 'ar';
+
+  useEffect(() => {
+    narrator.say(
+      'welcome.chooseAvatar',
+      { name: activeChild.name },
+      { language: activeChild.preferredLanguage }
+    );
+  }, [activeChild.name, activeChild.preferredLanguage]);
 
   const handleChooseChild = async (childId: string) => {
     audioService.playSoundEffect('sparkle');
     await selectChild(childId);
-    router.push('/(child)/home');
+    nav.replace('/(child)/home');
   };
 
   return (
     <ScreenContainer>
       <TopAdventureHeader
-        title="Who is Playing Today? • من سيلعب اليوم؟"
-        subtitle="Each explorer keeps their own stars, badges, and letters!"
-        onBack={() => router.back()}
+        title={isAr ? 'من سيلعب اليوم؟' : 'Who is Playing?'}
+        language={activeChild.preferredLanguage}
+        onBack={() => nav.back()}
       />
 
       <MascotBanner
         mascotEmoji="🦊🦉"
-        title="Choose Your Explorer Card!"
-        message="اختر بطاقتك لتبدأ رحلة الحروف والكتابة الممتعة"
+        title={isAr ? 'لنختر صورتنا!' : 'Tap your picture!'}
+        message={
+          isAr
+            ? 'اضغط على بطاقتك لنبدأ المغامرة'
+            : 'Tap your card to start playing'
+        }
+        isRtl={isAr}
         color={COLORS.surfaceWarm}
       />
 
+      {/* Avatar-only profile cards (avatar-picker removed per WP2; editing moved exclusively to Parent area) */}
       <View style={[styles.cardsContainer, isLandscape && styles.cardsContainerLandscape]}>
         {childrenProfiles.map((profile) => {
           const isSelected = profile.id === activeChild.id;
@@ -46,85 +61,32 @@ export default function ChooseChildScreen() {
             AVATAR_CATALOG.find((a) => a.id === profile.avatar) ?? AVATAR_CATALOG[0];
 
           return (
-            <View
+            <Pressable
               key={profile.id}
-              style={[
+              accessibilityRole="button"
+              accessibilityLabel={`Select ${profile.name}`}
+              onPress={() => handleChooseChild(profile.id)}
+              style={({ pressed }) => [
                 styles.profileCard,
                 SHADOWS.card,
                 {
-                  borderColor: isSelected ? avatarDef.accentColor : COLORS.borderLight,
+                  borderColor: isSelected ? COLORS.sunshineYellow : avatarDef.accentColor,
                   backgroundColor: isSelected ? '#FFFFFF' : COLORS.surfaceSoft,
+                  transform: [{ scale: pressed ? 0.96 : 1 }],
                 },
               ]}
             >
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Select ${profile.name}`}
-                onPress={() => handleChooseChild(profile.id)}
-                style={styles.cardMainPress}
-              >
-                <View style={[styles.avatarCircle, { backgroundColor: avatarDef.bgColor }]}>
-                  <Text style={styles.avatarEmoji}>{avatarDef.emoji}</Text>
-                </View>
-
-                <Text style={styles.profileName}>{profile.name}</Text>
-
-                <View style={styles.starsRow}>
-                  <Text style={styles.starIcon}>⭐</Text>
-                  <Text style={styles.starNumber}>{profile.starsCount} Stars</Text>
-                </View>
-
-                {isSelected ? (
-                  <View
-                    style={[
-                      styles.selectedTag,
-                      { backgroundColor: avatarDef.bgColor },
-                    ]}
-                  >
-                    <Text style={[styles.selectedTagText, { color: avatarDef.accentColor }]}>
-                      ✓ Selected • مختار
-                    </Text>
-                  </View>
-                ) : null}
-              </Pressable>
-
-              {/* Quick gender-neutral avatar picker row */}
-              <Text style={styles.avatarPickerLabel}>Pick Avatar Buddy • اختر صديقك:</Text>
-              <View style={styles.avatarMiniRow}>
-                {AVATAR_CATALOG.map((av) => {
-                  const activeAv = av.id === profile.avatar;
-                  return (
-                    <Pressable
-                      key={av.id}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Change ${profile.name} avatar to ${av.nameEn}`}
-                      onPress={() => {
-                        audioService.playSoundEffect('tap');
-                        updateChild(profile.id, profile.name, av.id);
-                      }}
-                      style={[
-                        styles.avatarMiniBtn,
-                        {
-                          backgroundColor: av.bgColor,
-                          borderColor: activeAv ? av.accentColor : 'transparent',
-                        },
-                      ]}
-                    >
-                      <Text style={styles.avatarMiniEmoji}>{av.emoji}</Text>
-                    </Pressable>
-                  );
-                })}
+              <View style={[styles.avatarCircle, { backgroundColor: avatarDef.bgColor }]}>
+                <Text style={styles.avatarEmoji}>{avatarDef.emoji}</Text>
               </View>
 
-              <PlayfulButton
-                emoji="🎨"
-                label={`Play as ${profile.name}`}
-                sublabel={`العب باسم ${profile.name}`}
-                color={avatarDef.accentColor}
-                onPress={() => handleChooseChild(profile.id)}
-                style={styles.playBtn}
-              />
-            </View>
+              <Text style={styles.profileName}>{profile.name}</Text>
+
+              <View style={styles.starsRow}>
+                <Text style={styles.starIcon}>⭐</Text>
+                <Text style={styles.starNumber}>{profile.starsCount}</Text>
+              </View>
+            </Pressable>
           );
         })}
       </View>
@@ -134,8 +96,8 @@ export default function ChooseChildScreen() {
 
 const styles = StyleSheet.create({
   cardsContainer: {
-    gap: SPACING.lg,
-    marginTop: SPACING.sm,
+    gap: SPACING.xl,
+    marginTop: SPACING.md,
   },
   cardsContainerLandscape: {
     flexDirection: 'row',
@@ -145,27 +107,24 @@ const styles = StyleSheet.create({
   profileCard: {
     flex: 1,
     borderRadius: RADIUS.xl,
-    padding: SPACING.lg,
-    borderWidth: 4,
-    alignItems: 'center',
-  },
-  cardMainPress: {
-    alignItems: 'center',
-    width: '100%',
-  },
-  avatarCircle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    padding: SPACING.xl,
+    borderWidth: 5,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: SPACING.sm,
+    gap: SPACING.md,
+  },
+  avatarCircle: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   avatarEmoji: {
-    fontSize: 62,
+    fontSize: 72,
   },
   profileName: {
-    fontSize: 32,
+    fontSize: 34,
     fontWeight: '900',
     color: COLORS.textPrimary,
   },
@@ -173,56 +132,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.sunshineYellowLight,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: 6,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: 8,
     borderRadius: RADIUS.pill,
-    marginTop: SPACING.xs,
-    gap: 6,
+    gap: 8,
   },
   starIcon: {
-    fontSize: 18,
+    fontSize: 22,
   },
   starNumber: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: COLORS.sunshineYellowDark,
-  },
-  selectedTag: {
-    marginTop: SPACING.sm,
-    paddingHorizontal: 14,
-    paddingVertical: 5,
-    borderRadius: RADIUS.pill,
-  },
-  selectedTagText: {
-    fontSize: 14,
+    fontSize: 22,
     fontWeight: '900',
-  },
-  avatarPickerLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.textSecondary,
-    marginTop: SPACING.md,
-    marginBottom: 8,
-  },
-  avatarMiniRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 8,
-    marginBottom: SPACING.md,
-  },
-  avatarMiniBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2.5,
-  },
-  avatarMiniEmoji: {
-    fontSize: 24,
-  },
-  playBtn: {
-    width: '100%',
+    color: COLORS.sunshineYellowDark,
   },
 });

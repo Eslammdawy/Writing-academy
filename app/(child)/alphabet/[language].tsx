@@ -22,7 +22,7 @@ export default function AlphabetExplorerScreen() {
   const language: LanguageCode = params.language === 'ar' ? 'ar' : 'en';
   const isAr = language === 'ar';
   const { gridColumns } = useTabletLayout();
-  const { activeChild, progressMap } = useAppState();
+  const { activeChild, progressMap, parentSettings } = useAppState();
   const [filter, setFilter] = useState<ChildFilter>('all');
 
   const allLetters = useMemo(() => getLettersByLanguage(language), [language]);
@@ -135,7 +135,11 @@ export default function AlphabetExplorerScreen() {
                 accessibilityLabel={`${letter.nameEn} ${letter.example.word}`}
                 onPress={() => {
                   audioService.pronounceLetter(letter);
-                  nav.push(`/(child)/letter/${letter.id}`);
+                  if (parentSettings.exploreMode) {
+                    nav.push(`/(child)/letter/${letter.id}`);
+                  } else {
+                    nav.push(`/(child)/lesson/${letter.id}`);
+                  }
                 }}
                 style={({ pressed }) => [
                   styles.letterTile,
