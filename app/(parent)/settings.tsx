@@ -7,6 +7,7 @@ import {
   TopAdventureHeader,
 } from '../../src/components/PlayfulUI';
 import { useAppState } from '../../src/context/AppStateContext';
+import { narrator } from '../../src/services/audio/narrator';
 import { COLORS, RADIUS, SHADOWS, SPACING } from '../../src/theme/tokens';
 
 export default function ParentSettingsScreen() {
@@ -15,6 +16,8 @@ export default function ParentSettingsScreen() {
     isParentAuthenticated,
     parentSettings,
     childrenProfiles,
+    voiceHealth,
+    recheckVoiceHealth,
     updateSettings,
     changeParentPin,
     resetChildData,
@@ -45,11 +48,24 @@ export default function ParentSettingsScreen() {
     setStatusMessage('Parent PIN updated and stored as a salted SHA-256 hash.');
   };
 
+  const handleTestVoice = async (lang: 'en' | 'ar') => {
+    await recheckVoiceHealth();
+    narrator.say('voice.test', undefined, { language: lang });
+    setStatusMessage(
+      lang === 'ar'
+        ? 'Playing Arabic voice test (voice.test)...'
+        : 'Playing English voice test (voice.test)...'
+    );
+  };
+
+  const isGuidedMode = parentSettings.guidedMode !== false;
+  const isExploreMode = Boolean(parentSettings.exploreMode);
+
   return (
     <ScreenContainer>
       <TopAdventureHeader
         title="Parent Settings & Controls • الإعدادات"
-        subtitle="Audio, daily practice goals, PIN security, and local data reset"
+        subtitle="Guided mode, voice health, daily goals, PIN security, and local reset"
         onBack={() => router.push('/(parent)/dashboard')}
       />
 
@@ -59,9 +75,44 @@ export default function ParentSettingsScreen() {
         </View>
       ) : null}
 
-      {/* Sound & Narration Controls */}
+      {/* Guided Mode vs Explore Mode Toggles (WP8) */}
       <View style={[styles.settingsCard, SHADOWS.card]}>
-        <Text style={styles.cardTitle}>🔊 Sound & Narration</Text>
+        <Text style={styles.cardTitle}>🧭 Child Navigation & Independence Mode</Text>
+        <Text style={styles.cardDesc}>
+          Guided Mode (default ON) focuses Home on Today’s Adventure star trail and
+          auto-advancing lessons. Explore Mode unlocks additional free-roaming world
+          and Word Builder shortcuts on Home.
+        </Text>
+        <View style={styles.rowWrap}>
+          <PlayfulButton
+            emoji={isGuidedMode ? '⭐' : '🧭'}
+            label={
+              isGuidedMode
+                ? 'Guided Mode: ON (Recommended)'
+                : 'Guided Mode: OFF'
+            }
+            color={isGuidedMode ? COLORS.mintGreen : COLORS.textSecondary}
+            minHeight={54}
+            onPress={() => updateSettings({ guidedMode: !isGuidedMode })}
+          />
+
+          <PlayfulButton
+            emoji={isExploreMode ? '🗺️' : '🔒'}
+            label={
+              isExploreMode
+                ? 'Explore Mode Shortcuts: ON'
+                : 'Explore Mode Shortcuts: OFF'
+            }
+            color={isExploreMode ? COLORS.skyBlue : COLORS.textSecondary}
+            minHeight={54}
+            onPress={() => updateSettings({ exploreMode: !isExploreMode })}
+          />
+        </View>
+      </View>
+
+      {/* Sound, Narration & Voice Health (WP1 & WP8) */}
+      <View style={[styles.settingsCard, SHADOWS.card]}>
+        <Text style={styles.cardTitle}>🔊 Sound, Narration & Offline Voice Health</Text>
         <View style={styles.rowWrap}>
           <PlayfulButton
             emoji={parentSettings.audioEnabled ? '🔊' : '🔇'}
@@ -95,19 +146,81 @@ export default function ParentSettingsScreen() {
             }
           />
         </View>
+
+        <View style={styles.voiceHealthBox}>
+          <Text style={styles.voiceHealthTitle}>
+            Offline TTS Voice Status:
+          </Text>
+          <Text style={styles.voiceHealthLine}>
+            • English Voice (`en-US`):{' '}
+            <Text
+              style={{
+                fontWeight: '900',
+                color: voiceHealth.enAvailable
+                  ? COLORS.mintGreenDark
+                  : COLORS.coralOrangeDark,
+              }}
+            >
+              {voiceHealth.enAvailable ? 'Installed ✓' : 'Missing ⚠️'}
+            </Text>{' '}
+            • Arabic Voice (`ar`):{' '}
+            <Text
+              style={{
+                fontWeight: '900',
+                color: voiceHealth.arAvailable
+                  ? COLORS.mintGreenDark
+                  : COLORS.coralOrangeDark,
+              }}
+            >
+              {voiceHealth.arAvailable ? 'Installed ✓' : 'Missing ⚠️'}
+            </Text>
+          </Text>
+
+          {(!voiceHealth.enAvailable || !voiceHealth.arAvailable) ? (
+            <Text style={styles.voiceWarningText}>
+              ⚠️ Warning: One or more offline TTS voices are not reported on this
+              device. On Android, open Settings → Accessibility → Text-to-speech
+              output → Install voice data (English & Arabic) so spoken instructions
+              work 100% offline.
+            </Text>
+          ) : null}
+
+          <View style={styles.rowWrap}>
+            <PlayfulButton
+              emoji="🇬🇧"
+              label="Test English Voice"
+              color={COLORS.skyBlue}
+              variant="outline"
+              minHeight={48}
+              onPress={() => handleTestVoice('en')}
+            />
+            <PlayfulButton
+              emoji="🕌"
+              label="Test Arabic Voice"
+              color={COLORS.mintGreenDark}
+              variant="outline"
+              minHeight={48}
+              onPress={() => handleTestVoice('ar')}
+            />
+          </View>
+        </View>
       </View>
 
-      {/* Daily Practice Goal */}
+      {/* Daily Practice Goal (Drives Today's Adventure + Friendly Break Suggestion) */}
       <View style={[styles.settingsCard, SHADOWS.card]}>
         <Text style={styles.cardTitle}>
           🎯 Daily Practice Goal ({parentSettings.dailyGoalLetters} letters /{' '}
-          {parentSettings.dailyGoalMinutes} mins)
+          {parentSettings.dailyGoalMinutes} mins break prompt)
+        </Text>
+        <Text style={styles.cardDesc}>
+          Controls the number of letters in Today’s Adventure and when the friendly
+          non-blocking rest suggestion appears.
         </Text>
         <View style={styles.rowWrap}>
           {[2, 3, 5].map((goalCount) => (
             <PlayfulButton
               key={goalCount}
-              label={`${goalCount} Letters / Day`}
+              label={`${goalCount} Letters / ${goalCount * 3}m`}
               color={COLORS.skyBlue}
               variant={
                 parentSettings.dailyGoalLetters === goalCount ? 'solid' : 'outline'
@@ -251,12 +364,38 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: COLORS.textSecondary,
+    lineHeight: 20,
   },
   rowWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: SPACING.sm,
     alignItems: 'center',
+  },
+  voiceHealthBox: {
+    backgroundColor: COLORS.surfaceSoft,
+    borderRadius: RADIUS.md,
+    padding: SPACING.md,
+    marginTop: SPACING.xs,
+    borderWidth: 1.5,
+    borderColor: COLORS.borderLight,
+    gap: SPACING.xs,
+  },
+  voiceHealthTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+  },
+  voiceHealthLine: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+  },
+  voiceWarningText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.coralOrangeDark,
+    lineHeight: 19,
   },
   pinInput: {
     width: 180,

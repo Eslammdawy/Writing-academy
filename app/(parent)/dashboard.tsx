@@ -18,12 +18,15 @@ import {
 } from '../../src/data/curriculum';
 import { useTabletLayout } from '../../src/hooks/useTabletLayout';
 import { COLORS, RADIUS, SHADOWS, SPACING } from '../../src/theme/tokens';
+import { getLocalDateString } from '../../src/utils/dateUtils';
+import { DEFAULT_PARENT_PIN_HASH } from '../../src/utils/pinSecurity';
 
 export default function ParentDashboardScreen() {
   const router = useRouter();
   const { isLandscape } = useTabletLayout();
   const {
     isParentAuthenticated,
+    parentSettings,
     childrenProfiles,
     getChildSummaryForParent,
     lockParentArea,
@@ -74,15 +77,16 @@ export default function ParentDashboardScreen() {
       introduced.map((r) => r.independentWritingScore).filter((s) => s > 0)
     );
 
-    const needsRevision = ALL_LETTERS.filter((l) => {
+    // WP8 "Needs Help" list: letters flagged by fail-soft ladder (`needsHelp`) or low scores
+    const needsHelpLetters = ALL_LETTERS.filter((l) => {
       const p = summary.progress[l.id];
+      if (!p || p.attempts === 0) return false;
       return (
-        p &&
-        p.attempts > 0 &&
-        p.masteryStatus !== 'mastered' &&
-        (p.tracingScore < 68 || p.independentWritingScore < 62)
+        Boolean(p.needsHelp) ||
+        (p.masteryStatus !== 'mastered' &&
+          (p.tracingScore < 68 || p.independentWritingScore < 62))
       );
-    }).slice(0, 8);
+    }).slice(0, 10);
 
     const totalSeconds = summary.sessions.reduce(
       (acc, s) => acc + s.durationSeconds,
@@ -93,6 +97,8 @@ export default function ParentDashboardScreen() {
       Math.round(totalSeconds / 60)
     );
 
+    const lastSession = summary.sessions[0] ?? null;
+
     return {
       introducedCount: introduced.length,
       practicingCount: practicing.length,
@@ -102,15 +108,18 @@ export default function ParentDashboardScreen() {
       avgRecognition,
       avgTracing,
       avgWriting,
-      needsRevision,
+      needsHelpLetters,
       totalMinutes,
       sessionsCount: summary.sessions.length,
+      lastSession,
     };
   }, [summary]);
 
   if (!isParentAuthenticated) {
     return null;
   }
+
+  const isUsingDefaultPin = parentSettings.pinHash === DEFAULT_PARENT_PIN_HASH;
 
   return (
     <ScreenContainer>
@@ -122,6 +131,22 @@ export default function ParentDashboardScreen() {
           router.replace('/');
         }}
       />
+
+      {/* Default PIN Warning Banner (WP7) */}
+      {isUsingDefaultPin ? (
+        <View style={styles.defaultPinBanner}>
+          <Text style={styles.defaultPinBannerText}>
+            ⚠️ Security Notice: You are still using the default PIN — please change it
+            in Settings so children cannot guess it.
+          </Text>
+          <PlayfulButton
+            label="Change PIN"
+            color={COLORS.coralOrangeDark}
+            minHeight={44}
+            onPress={() => router.push('/(parent)/settings')}
+          />
+        </View>
+      ) : null}
 
       {/* Top Navigation Bar for Parent Sections */}
       <View style={styles.parentNavRow}>
@@ -232,12 +257,32 @@ export default function ParentDashboardScreen() {
             </View>
           </View>
 
-          {/* Weekly Summary & Letters Needing Revision */}
+          {/* Last Session Summary & Needs Help List (WP8) */}
           <View style={[styles.detailsRow, isLandscape && styles.kpiGridLandscape]}>
             <View style={[styles.detailCard, SHADOWS.card]}>
               <Text style={styles.sectionTitle}>
-                📌 Weekly Summary (Generated Locally)
+                🕒 Last Session & Weekly Summary
               </Text>
+              {metrics.lastSession ? (
+                <View style={styles.lastSessionBox}>
+                  <Text style={styles.lastSessionHeadline}>
+                    Last Session ({getLocalDateString(new Date(metrics.lastSession.sessionDate))}):
+                  </Text>
+                  <Text style={styles.lastSessionMeta}>
+                    Language:{' '}
+                    {metrics.lastSession.language === 'ar'
+                      ? 'Arabic (العربية)'
+                      : 'English'}{' '}
+                    • Duration: {metrics.lastSession.durationSeconds}s • Score:{' '}
+                    {metrics.lastSession.score}%
+                  </Text>
+                </View>
+              ) : (
+                <Text style={styles.weeklyText}>
+                  • No practice sessions recorded yet for {summary.child.name}.
+                </Text>
+              )}
+
               <Text style={styles.weeklyText}>
                 • {summary.child.name} has practiced {metrics.introducedCount} letters
                 ({metrics.enIntroduced} English, {metrics.arIntroduced} Arabic) and
@@ -247,29 +292,43 @@ export default function ParentDashboardScreen() {
                 • Tracing accuracy averages {metrics.avgTracing}%, and freehand writing
                 averages {metrics.avgWriting}%.
               </Text>
-              <Text style={styles.weeklyText}>
-                • Note: Scores are deterministic geometric guidance metrics for 5–6 year
-                olds, not clinical assessments.
-              </Text>
             </View>
 
             <View style={[styles.detailCard, SHADOWS.card]}>
               <Text style={styles.sectionTitle}>
-                🔍 Letters Recommended for Revision
+                🆘 Needs Help & Recommended for Revision
               </Text>
-              {metrics.needsRevision.length === 0 ? (
+              {metrics.needsHelpLetters.length === 0 ? (
                 <Text style={styles.weeklyText}>
-                  No letters flagged for extra revision yet! Encourage{' '}
-                  {summary.child.name} to explore new letters in the Alphabet Explorer.
+                  No letters flagged for extra help yet! Encourage {summary.child.name}{' '}
+                  to continue Today’s Adventure.
                 </Text>
               ) : (
                 <View style={styles.revisionPillsWrap}>
-                  {metrics.needsRevision.map((l) => (
-                    <View key={l.id} style={styles.revisionPill}>
-                      <Text style={styles.revisionPillChar}>{l.character}</Text>
-                      <Text style={styles.revisionPillName}>{l.example.word}</Text>
-                    </View>
-                  ))}
+                  {metrics.needsHelpLetters.map((l) => {
+                    const p = summary.progress[l.id];
+                    const flagged = Boolean(p?.needsHelp);
+                    return (
+                      <View
+                        key={l.id}
+                        style={[
+                          styles.revisionPill,
+                          flagged && styles.revisionPillUrgent,
+                        ]}
+                      >
+                        <Text style={styles.revisionPillChar}>{l.character}</Text>
+                        <View>
+                          <Text style={styles.revisionPillName}>
+                            {l.example.word} {flagged ? '• Needs Help' : ''}
+                          </Text>
+                          <Text style={styles.revisionPillScore}>
+                            Trace {p?.tracingScore ?? 0}% • Write{' '}
+                            {p?.independentWritingScore ?? 0}%
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })}
                 </View>
               )}
             </View>
@@ -281,6 +340,26 @@ export default function ParentDashboardScreen() {
 }
 
 const styles = StyleSheet.create({
+  defaultPinBanner: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.surfaceCoral,
+    borderWidth: 2,
+    borderColor: COLORS.coralOrange,
+    borderRadius: RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+    gap: SPACING.sm,
+  },
+  defaultPinBannerText: {
+    flex: 1,
+    minWidth: 240,
+    fontSize: 15,
+    fontWeight: '800',
+    color: COLORS.coralOrangeDark,
+  },
   parentNavRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -362,6 +441,25 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     marginBottom: 4,
   },
+  lastSessionBox: {
+    backgroundColor: COLORS.surfaceSoft,
+    borderRadius: RADIUS.md,
+    padding: SPACING.sm,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    marginBottom: 4,
+  },
+  lastSessionHeadline: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: COLORS.skyBlueDark,
+  },
+  lastSessionMeta: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    marginTop: 2,
+  },
   weeklyText: {
     fontSize: 15,
     fontWeight: '600',
@@ -380,16 +478,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: RADIUS.md,
-    gap: 6,
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: COLORS.coralOrangeLight,
+  },
+  revisionPillUrgent: {
+    borderColor: COLORS.coralOrangeDark,
+    borderWidth: 2.5,
   },
   revisionPillChar: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '900',
     color: COLORS.coralOrangeDark,
+    fontFamily: 'NotoSansArabic-Regular',
   },
   revisionPillName: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
     color: COLORS.textPrimary,
+  },
+  revisionPillScore: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
   },
 });

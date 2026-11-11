@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   PlayfulButton,
@@ -9,16 +9,38 @@ import {
 import { useAppState } from '../../src/context/AppStateContext';
 import { audioService } from '../../src/services/audio/audioService';
 import { COLORS, RADIUS, SHADOWS, SPACING } from '../../src/theme/tokens';
+import {
+  DEFAULT_PARENT_PIN_HASH,
+  generateAdultMathChallenge,
+} from '../../src/utils/pinSecurity';
 
 export default function ParentPinGateScreen() {
   const router = useRouter();
-  const { parentSettings, authenticateParent, authenticateParentByRecovery } =
-    useAppState();
+  const {
+    parentSettings,
+    authenticateParent,
+    authenticateParentByRecovery,
+    changeParentPin,
+  } = useAppState();
+
+  const isFirstVisitSetup =
+    !parentSettings.pinHintShown &&
+    parentSettings.pinHash === DEFAULT_PARENT_PIN_HASH;
 
   const [digits, setDigits] = useState<string>('');
+  const [setupStep, setSetupStep] = useState<'enter' | 'confirm'>('enter');
+  const [firstPinEntry, setFirstPinEntry] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showRecovery, setShowRecovery] = useState(false);
   const [recoveryInput, setRecoveryInput] = useState('');
+  const [challengeSeed, setChallengeSeed] = useState(0);
+
+  // Randomized recovery math challenge (WP7 / Fixes P11)
+  const challenge = useMemo(
+    () => generateAdultMathChallenge(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [challengeSeed]
+  );
 
   const handleDigitPress = async (d: string) => {
     audioService.playSoundEffect('tap');
@@ -28,6 +50,29 @@ export default function ParentPinGateScreen() {
     setDigits(next);
 
     if (next.length === 4) {
+      if (isFirstVisitSetup) {
+        if (setupStep === 'enter') {
+          setFirstPinEntry(next);
+          setDigits('');
+          setSetupStep('confirm');
+          return;
+        }
+        // Confirm step
+        if (next === firstPinEntry) {
+          await changeParentPin(next);
+          await authenticateParent(next);
+          audioService.playSoundEffect('sparkle');
+          router.replace('/(parent)/dashboard');
+        } else {
+          audioService.playSoundEffect('gentle_hint');
+          setErrorMsg('PINs did not match. Please choose a 4-digit PIN again.');
+          setFirstPinEntry('');
+          setDigits('');
+          setSetupStep('enter');
+        }
+        return;
+      }
+
       const ok = await authenticateParent(next);
       if (ok) {
         audioService.playSoundEffect('sparkle');
@@ -47,14 +92,27 @@ export default function ParentPinGateScreen() {
   };
 
   const handleVerifyRecovery = async () => {
-    // Adult math verification: 17 x 3 + 9 = 60
-    if (recoveryInput.trim() === '60') {
+    if (Number(recoveryInput.trim()) === challenge.answer) {
       await authenticateParentByRecovery();
       router.replace('/(parent)/settings');
     } else {
-      setErrorMsg('Incorrect answer to the parent verification question.');
+      setErrorMsg('Incorrect answer. Try the new parent math question.');
+      setRecoveryInput('');
+      setChallengeSeed((s) => s + 1);
     }
   };
+
+  const titleText = isFirstVisitSetup
+    ? setupStep === 'enter'
+      ? 'Create Your 4-Digit Parent PIN'
+      : 'Confirm Your 4-Digit Parent PIN'
+    : 'Enter 4-Digit Parent PIN';
+
+  const subtitleText = isFirstVisitSetup
+    ? setupStep === 'enter'
+      ? 'Choose a 4-digit PIN (enter twice to confirm) • أنشئ رمز الوالدين'
+      : 'Re-enter the same 4 digits to confirm • أعد إدخال الرمز للتأكيد'
+    : 'أدخل الرمز السري المكون من ٤ أرقام';
 
   return (
     <ScreenContainer>
@@ -67,19 +125,8 @@ export default function ParentPinGateScreen() {
       <View style={styles.centerWrap}>
         <View style={[styles.pinCard, SHADOWS.card]}>
           <Text style={styles.lockIcon}>🔒</Text>
-          <Text style={styles.cardTitle}>Enter 4-Digit Parent PIN</Text>
-          <Text style={styles.cardSubtitle}>أدخل الرمز السري المكون من ٤ أرقام</Text>
-
-          {/* First-visit parent setup hint as agreed in configuration */}
-          {!parentSettings.pinHintShown ? (
-            <View style={styles.firstVisitHintBox}>
-              <Text style={styles.firstVisitHintText}>
-                💡 First-time Parent Setup Hint: The initial default PIN is{' '}
-                <Text style={{ fontWeight: '900' }}>1234</Text> (stored as a SHA-256
-                hash). You can change it anytime in Parent Settings.
-              </Text>
-            </View>
-          ) : null}
+          <Text style={styles.cardTitle}>{titleText}</Text>
+          <Text style={styles.cardSubtitle}>{subtitleText}</Text>
 
           {/* 4 PIN Dots */}
           <View style={styles.pinDotsRow}>
@@ -133,7 +180,11 @@ export default function ParentPinGateScreen() {
 
           <Pressable
             accessibilityRole="button"
-            onPress={() => setShowRecovery((s) => !s)}
+            onPress={() => {
+              setShowRecovery((s) => !s);
+              setChallengeSeed((s) => s + 1);
+              setRecoveryInput('');
+            }}
             style={styles.forgotLink}
           >
             <Text style={styles.forgotLinkText}>
@@ -144,7 +195,7 @@ export default function ParentPinGateScreen() {
           {showRecovery ? (
             <View style={styles.recoveryBox}>
               <Text style={styles.recoveryLabel}>
-                Parent Verification: What is (17 × 3) + 9?
+                Parent Verification: What is {challenge.prompt}?
               </Text>
               <View style={styles.recoveryInputRow}>
                 <TextInput
@@ -194,6 +245,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '900',
     color: COLORS.textPrimary,
+    textAlign: 'center',
   },
   cardSubtitle: {
     fontSize: 16,
@@ -201,20 +253,6 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: 2,
     marginBottom: SPACING.md,
-  },
-  firstVisitHintBox: {
-    backgroundColor: COLORS.surfaceWarm,
-    borderRadius: RADIUS.md,
-    padding: SPACING.md,
-    borderWidth: 1.5,
-    borderColor: '#FDE68A',
-    marginBottom: SPACING.md,
-  },
-  firstVisitHintText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-    lineHeight: 20,
     textAlign: 'center',
   },
   pinDotsRow: {

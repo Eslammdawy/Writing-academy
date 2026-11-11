@@ -11,7 +11,9 @@ import {
 import {
   computeMasteryStatus,
   LocalAcademyRepository,
+  runForwardMigrations,
 } from '../src/database/repository';
+import { SCHEMA_VERSION } from '../src/database/schema';
 import { pointsToSvgPath } from '../src/data/strokeGeometry';
 import {
   evaluateHandwritingAttempt,
@@ -42,6 +44,7 @@ import { RecordedStroke } from '../src/types';
 import {
   DEFAULT_PARENT_PIN,
   DEFAULT_PARENT_PIN_HASH,
+  generateAdultMathChallenge,
   hashParentPin,
   verifyParentPin,
 } from '../src/utils/pinSecurity';
@@ -738,3 +741,99 @@ describe('7. Honest Game & Word Builder Scoring (Phase 4 - Fixes P12)', () => {
     expect(messyWord.durationSeconds).toBe(29);
   });
 });
+
+describe('8. Forward-Only Schema Migration v1 -> v2, Needs Help & Parent Safety (Phase 5 - WP7/WP8)', () => {
+  test('runForwardMigrations upgrades a v1 database to SCHEMA_VERSION = 2 without dropping child data', async () => {
+    expect(SCHEMA_VERSION).toBe(2);
+
+    const executedSql: string[] = [];
+    const migrationTable: { version: number; applied_at: string }[] = [
+      { version: 1, applied_at: '2026-11-01T00:00:00.000Z' },
+    ];
+
+    const mockSqliteV1Db = {
+      execAsync: async (sql: string) => {
+        executedSql.push(sql);
+      },
+      getAllAsync: async (sql: string) => {
+        if (sql.includes('FROM schema_migrations')) {
+          return [...migrationTable];
+        }
+        return [];
+      },
+      runAsync: async (sql: string, params: any[]) => {
+        if (sql.includes('INSERT OR IGNORE INTO schema_migrations')) {
+          const v = sql.includes('(2,') ? 2 : 1;
+          migrationTable.push({ version: v, applied_at: String(params[0]) });
+        }
+      },
+    };
+
+    const applied = await runForwardMigrations(mockSqliteV1Db);
+    expect(applied).toEqual([2]);
+    expect(migrationTable.map((m) => m.version)).toEqual([1, 2]);
+    expect(
+      executedSql.some((s) =>
+        s.includes('ALTER TABLE parent_settings ADD COLUMN guided_mode')
+      )
+    ).toBe(true);
+    expect(
+      executedSql.some((s) =>
+        s.includes('ALTER TABLE learning_progress ADD COLUMN needs_help')
+      )
+    ).toBe(true);
+
+    // Running again is idempotent (no duplicate migrations)
+    const appliedSecond = await runForwardMigrations(mockSqliteV1Db);
+    expect(appliedSecond).toEqual([]);
+  });
+
+  test('recordPracticeOutcome persists needsHelp and consecutiveFails and resets on success', async () => {
+    const repo = new LocalAcademyRepository(true);
+    await repo.initialize();
+
+    const failOutcome = await repo.recordPracticeOutcome({
+      childId: 'child_soufy',
+      letterId: 'en_Q',
+      formKey: 'uppercase',
+      mode: 'trace',
+      score: 42,
+      passed: false,
+      starsEarned: 1,
+      scoringVersion: SCORING_VERSION,
+      metricsJson: '{}',
+      durationSeconds: 18,
+      needsHelp: true,
+      consecutiveFails: 3,
+    });
+
+    expect(failOutcome.updatedProgress.needsHelp).toBe(true);
+    expect(failOutcome.updatedProgress.consecutiveFails).toBe(3);
+
+    const passOutcome = await repo.recordPracticeOutcome({
+      childId: 'child_soufy',
+      letterId: 'en_Q',
+      formKey: 'uppercase',
+      mode: 'write',
+      score: 88,
+      passed: true,
+      starsEarned: 3,
+      scoringVersion: SCORING_VERSION,
+      metricsJson: '{}',
+      durationSeconds: 14,
+    });
+
+    expect(passOutcome.updatedProgress.needsHelp).toBe(false);
+    expect(passOutcome.updatedProgress.consecutiveFails).toBe(0);
+  });
+
+  test('generateAdultMathChallenge produces randomized non-constant arithmetic challenges', () => {
+    const c1 = generateAdultMathChallenge(() => 0.1);
+    const c2 = generateAdultMathChallenge(() => 0.85);
+    expect(c1.answer).toBe(c1.a * c1.b + c1.c);
+    expect(c2.answer).toBe(c2.a * c2.b + c2.c);
+    expect(c1.prompt).not.toBe(c2.prompt);
+    expect(c1.answer).not.toBe(c2.answer);
+  });
+});
+

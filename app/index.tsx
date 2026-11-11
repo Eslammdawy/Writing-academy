@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ScreenContainer } from '../src/components/PlayfulUI';
 import { useAppState } from '../src/context/AppStateContext';
 import { AVATAR_CATALOG } from '../src/data/curriculum';
@@ -14,6 +14,16 @@ export default function WelcomeSplashScreen() {
   const { isLandscape } = useTabletLayout();
   const { childrenProfiles, activeChild, selectChild, isReady } = useAppState();
   const isAr = activeChild.preferredLanguage === 'ar';
+  const [showExitHint, setShowExitHint] = useState(false);
+
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setShowExitHint(true);
+      audioService.playSoundEffect('gentle_hint');
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     if (!isReady) return;
@@ -50,7 +60,12 @@ export default function WelcomeSplashScreen() {
           accessibilityRole="button"
           accessibilityLabel="Parent Gate (Hold for 2 seconds)"
           delayLongPress={1800}
+          onPress={() => {
+            setShowExitHint(true);
+            audioService.playSoundEffect('gentle_hint');
+          }}
           onLongPress={() => {
+            setShowExitHint(false);
             audioService.playSoundEffect('tap');
             nav.push('/(parent)/pin');
           }}
@@ -59,6 +74,20 @@ export default function WelcomeSplashScreen() {
           <Text style={styles.parentEntryIcon}>🔒</Text>
         </Pressable>
       </View>
+
+      {showExitHint ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setShowExitHint(false)}
+          style={styles.exitHintPill}
+        >
+          <Text style={styles.exitHintText}>
+            {isAr
+              ? '🔒 اطلب من أحد الوالدين الضغط مطولًا على القفل'
+              : '🔒 Ask a grown-up to press & hold 🔒 for 2 seconds'}
+          </Text>
+        </Pressable>
+      ) : null}
 
       <View style={styles.centerStage}>
         {/* Brand Mascots Header */}
@@ -158,6 +187,22 @@ const styles = StyleSheet.create({
   },
   parentEntryIcon: {
     fontSize: 22,
+  },
+  exitHintPill: {
+    alignSelf: 'center',
+    backgroundColor: COLORS.surfaceWarm,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+    borderRadius: RADIUS.pill,
+    borderWidth: 2,
+    borderColor: '#FDE68A',
+    marginTop: SPACING.xs,
+  },
+  exitHintText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+    fontFamily: 'NotoSansArabic-Regular',
   },
   centerStage: {
     flex: 1,

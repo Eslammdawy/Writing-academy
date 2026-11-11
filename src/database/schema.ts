@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const MIGRATION_SQL_V1 = `
 PRAGMA foreign_keys = ON;
@@ -119,3 +119,17 @@ CREATE TABLE IF NOT EXISTS parent_settings (
   sound_effects_volume REAL NOT NULL DEFAULT 0.85
 );
 `;
+
+/**
+ * Forward-only Schema Migration v2 (WP8):
+ * Adds guided_mode & explore_mode to parent_settings, and needs_help & consecutive_fails
+ * to learning_progress without dropping or resetting existing user data.
+ */
+export const MIGRATION_SQL_V2_STATEMENTS: string[] = [
+  `ALTER TABLE parent_settings ADD COLUMN guided_mode INTEGER NOT NULL DEFAULT 1;`,
+  `ALTER TABLE parent_settings ADD COLUMN explore_mode INTEGER NOT NULL DEFAULT 0;`,
+  `ALTER TABLE learning_progress ADD COLUMN needs_help INTEGER NOT NULL DEFAULT 0;`,
+  `ALTER TABLE learning_progress ADD COLUMN consecutive_fails INTEGER NOT NULL DEFAULT 0;`,
+];
+
+export const MIGRATION_SQL_V2 = MIGRATION_SQL_V2_STATEMENTS.join('\n');

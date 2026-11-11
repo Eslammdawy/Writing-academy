@@ -176,6 +176,8 @@ export default function GuidedLessonScreen() {
           durationSeconds,
           hasDotsReward: Boolean(letter.dotCount && letter.dotCount > 0 && !isGentleSkip),
           isRetry: state.consecutiveFails > 0,
+          needsHelp: state.flaggedNeedsHelp,
+          consecutiveFails: state.consecutiveFails,
         }).catch(() => {});
       }
 

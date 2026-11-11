@@ -1,6 +1,6 @@
 import { useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   MascotBanner,
   PlayfulButton,
@@ -32,6 +32,17 @@ export default function ChildHomeAdventureScreen() {
       : activeChild.preferredLanguage
   );
   const [dismissedBreakToday, setDismissedBreakToday] = useState(false);
+  const [showExitPrompt, setShowExitPrompt] = useState(false);
+
+  // Intercept Android hardware back on Home so a child cannot exit the app accidentally (WP7)
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setShowExitPrompt(true);
+      audioService.playSoundEffect('gentle_hint');
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
 
   // Sync default adventure language when switching child profiles
   useEffect(() => {
@@ -114,7 +125,40 @@ export default function ChildHomeAdventureScreen() {
         childAvatar={activeChild.avatar}
         starsCount={activeChild.starsCount}
         onPressChildBadge={() => nav.push('/(child)/profiles')}
+        rightElement={
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Parent Gate (Hold for 2 seconds)"
+            delayLongPress={1800}
+            onPress={() => {
+              setShowExitPrompt(true);
+              audioService.playSoundEffect('gentle_hint');
+            }}
+            onLongPress={() => {
+              setShowExitPrompt(false);
+              audioService.playSoundEffect('tap');
+              nav.push('/(parent)/pin');
+            }}
+            style={styles.parentLockBtn}
+          >
+            <Text style={styles.parentLockEmoji}>🔒</Text>
+          </Pressable>
+        }
       />
+
+      {showExitPrompt ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setShowExitPrompt(false)}
+          style={styles.exitPromptBanner}
+        >
+          <Text style={styles.exitPromptText}>
+            {isUiAr
+              ? '🔒 اطلب من أحد الوالدين الضغط مطولًا على القفل للخروج أو الإعدادات'
+              : '🔒 Ask a grown-up to press & hold 🔒 for 2 seconds'}
+          </Text>
+        </Pressable>
+      ) : null}
 
       <MascotBanner
         mascotEmoji="🦊✨"
@@ -408,6 +452,36 @@ export default function ChildHomeAdventureScreen() {
 }
 
 const styles = StyleSheet.create({
+  parentLockBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1.5,
+    borderColor: COLORS.borderCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: 0.72,
+  },
+  parentLockEmoji: {
+    fontSize: 20,
+  },
+  exitPromptBanner: {
+    alignSelf: 'center',
+    backgroundColor: COLORS.surfaceWarm,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+    borderRadius: RADIUS.pill,
+    borderWidth: 2,
+    borderColor: '#FDE68A',
+    marginBottom: SPACING.sm,
+  },
+  exitPromptText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+    fontFamily: 'NotoSansArabic-Regular',
+  },
   breakSuggestionCard: {
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.xl,

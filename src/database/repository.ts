@@ -14,7 +14,53 @@ import {
   PracticeSessionRecord,
 } from '../types';
 import { DEFAULT_PARENT_PIN_HASH, hashParentPin, verifyParentPin } from '../utils/pinSecurity';
-import { MIGRATION_SQL_V1 } from './schema';
+import { MIGRATION_SQL_V1, MIGRATION_SQL_V2_STATEMENTS, SCHEMA_VERSION } from './schema';
+
+/**
+ * Forward-only SQLite migration runner (WP8).
+ * Safely upgrades an existing v1 database (or fresh database) to SCHEMA_VERSION = 2
+ * using `schema_migrations` without dropping or resetting existing child data.
+ */
+export async function runForwardMigrations(sqliteDb: any): Promise<number[]> {
+  if (!sqliteDb) return [];
+  const appliedNow: number[] = [];
+  const nowIso = new Date().toISOString();
+
+  // Always ensure base v1 tables exist (`CREATE TABLE IF NOT EXISTS ...`)
+  await sqliteDb.execAsync(MIGRATION_SQL_V1);
+
+  const appliedRows: { version: number }[] =
+    (await sqliteDb.getAllAsync('SELECT version FROM schema_migrations ORDER BY version ASC')) ??
+    [];
+  const appliedVersions = new Set<number>(appliedRows.map((r) => Number(r.version)));
+
+  if (!appliedVersions.has(1)) {
+    await sqliteDb.runAsync(
+      'INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (1, ?)',
+      [nowIso]
+    );
+    appliedVersions.add(1);
+    appliedNow.push(1);
+  }
+
+  if (SCHEMA_VERSION >= 2 && !appliedVersions.has(2)) {
+    for (const statement of MIGRATION_SQL_V2_STATEMENTS) {
+      try {
+        await sqliteDb.execAsync(statement);
+      } catch {
+        // Ignore duplicate column errors if migration was partially applied previously
+      }
+    }
+    await sqliteDb.runAsync(
+      'INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (2, ?)',
+      [nowIso]
+    );
+    appliedVersions.add(2);
+    appliedNow.push(2);
+  }
+
+  return appliedNow;
+}
 
 /**
  * Computes mastery status deterministically.
@@ -55,6 +101,8 @@ export interface RecordPracticeInput {
   durationSeconds: number;
   hasDotsReward?: boolean;
   isRetry?: boolean;
+  needsHelp?: boolean;
+  consecutiveFails?: number;
 }
 
 export interface AcademyRepository {
@@ -104,23 +152,32 @@ export class LocalAcademyRepository implements AcademyRepository {
     audioEnabled: true,
     narrationEnabled: true,
     soundEffectsVolume: 0.85,
+    guidedMode: true,
+    exploreMode: false,
   };
 
-  constructor(private readonly forceInMemory = false) {}
+  constructor(private readonly forceInMemory = false, customSqliteDb: any = null) {
+    if (customSqliteDb) {
+      this.sqliteDb = customSqliteDb;
+    }
+  }
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
     this.seedDefaultsInMemory();
 
-    if (!this.forceInMemory) {
+    if (this.sqliteDb) {
+      await runForwardMigrations(this.sqliteDb);
+      await this.syncWithSqliteOnBoot();
+    } else if (!this.forceInMemory) {
       try {
         // Dynamically load expo-sqlite when running in Expo native runtime
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const SQLite = require('expo-sqlite');
         if (SQLite && typeof SQLite.openDatabaseAsync === 'function') {
           this.sqliteDb = await SQLite.openDatabaseAsync('soufy_nadine_academy.db');
-          await this.sqliteDb.execAsync(MIGRATION_SQL_V1);
+          await runForwardMigrations(this.sqliteDb);
           await this.syncWithSqliteOnBoot();
         }
       } catch {
@@ -163,8 +220,8 @@ export class LocalAcademyRepository implements AcademyRepository {
     );
     if (!settingsRow) {
       await this.sqliteDb.runAsync(
-        `INSERT INTO parent_settings (id, pin_hash_or_secure_representation, pin_hint_shown, daily_goal_minutes, daily_goal_letters, audio_enabled, narration_enabled, sound_effects_volume)
-         VALUES (1, ?, 0, 10, 3, 1, 1, 0.85)`,
+        `INSERT INTO parent_settings (id, pin_hash_or_secure_representation, pin_hint_shown, daily_goal_minutes, daily_goal_letters, audio_enabled, narration_enabled, sound_effects_volume, guided_mode, explore_mode)
+         VALUES (1, ?, 0, 10, 3, 1, 1, 0.85, 1, 0)`,
         [DEFAULT_PARENT_PIN_HASH]
       );
     } else {
@@ -174,9 +231,13 @@ export class LocalAcademyRepository implements AcademyRepository {
         pinHintShown: Boolean(settingsRow.pin_hint_shown),
         dailyGoalMinutes: Number(settingsRow.daily_goal_minutes ?? 10),
         dailyGoalLetters: Number(settingsRow.daily_goal_letters ?? 3),
-        audioEnabled: Boolean(settingsRow.audio_enabled),
-        narrationEnabled: Boolean(settingsRow.narration_enabled),
+        audioEnabled: Boolean(settingsRow.audio_enabled ?? 1),
+        narrationEnabled: Boolean(settingsRow.narration_enabled ?? 1),
         soundEffectsVolume: Number(settingsRow.sound_effects_volume ?? 0.85),
+        guidedMode:
+          settingsRow.guided_mode === undefined ? true : Boolean(settingsRow.guided_mode),
+        exploreMode:
+          settingsRow.explore_mode === undefined ? false : Boolean(settingsRow.explore_mode),
       };
     }
 
@@ -253,6 +314,8 @@ export class LocalAcademyRepository implements AcademyRepository {
         successfulAttempts: Number(r.successful_attempts ?? 0),
         masteryStatus: (r.mastery_status as MasteryStatus) || 'new',
         lastPracticed: r.last_practiced ?? null,
+        needsHelp: Boolean(r.needs_help ?? 0),
+        consecutiveFails: Number(r.consecutive_fails ?? 0),
       };
       this.progressMap.set(`${rec.childId}:${rec.letterId}`, rec);
     }
@@ -391,6 +454,8 @@ export class LocalAcademyRepository implements AcademyRepository {
           successfulAttempts: 0,
           masteryStatus: 'new',
           lastPracticed: null,
+          needsHelp: false,
+          consecutiveFails: 0,
         };
       }
     }
@@ -416,6 +481,8 @@ export class LocalAcademyRepository implements AcademyRepository {
       successfulAttempts: 0,
       masteryStatus: 'new' as MasteryStatus,
       lastPracticed: null,
+      needsHelp: false,
+      consecutiveFails: 0,
     };
 
     const nextAttempts = current.attempts + 1;
@@ -439,6 +506,20 @@ export class LocalAcademyRepository implements AcademyRepository {
       nextWriting
     );
 
+    const nextConsecutiveFails =
+      input.consecutiveFails !== undefined
+        ? input.consecutiveFails
+        : input.passed
+          ? 0
+          : (current.consecutiveFails ?? 0) + 1;
+
+    const nextNeedsHelp =
+      input.needsHelp !== undefined
+        ? input.needsHelp
+        : input.passed
+          ? false
+          : Boolean(current.needsHelp || nextConsecutiveFails >= 3);
+
     const updatedProgress: LearningProgressRecord = {
       ...current,
       recognitionScore: nextRecognition,
@@ -448,6 +529,8 @@ export class LocalAcademyRepository implements AcademyRepository {
       successfulAttempts: nextSuccessful,
       masteryStatus,
       lastPracticed: now,
+      needsHelp: nextNeedsHelp,
+      consecutiveFails: nextConsecutiveFails,
     };
     this.progressMap.set(key, updatedProgress);
 
@@ -490,8 +573,8 @@ export class LocalAcademyRepository implements AcademyRepository {
     if (this.sqliteDb) {
       await this.sqliteDb.runAsync(
         `INSERT OR REPLACE INTO learning_progress
-         (id, child_id, letter_id, recognition_score, tracing_score, independent_writing_score, attempts, successful_attempts, mastery_status, last_practiced)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, child_id, letter_id, recognition_score, tracing_score, independent_writing_score, attempts, successful_attempts, mastery_status, last_practiced, needs_help, consecutive_fails)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           updatedProgress.id,
           updatedProgress.childId,
@@ -503,6 +586,8 @@ export class LocalAcademyRepository implements AcademyRepository {
           updatedProgress.successfulAttempts,
           updatedProgress.masteryStatus,
           updatedProgress.lastPracticed,
+          updatedProgress.needsHelp ? 1 : 0,
+          updatedProgress.consecutiveFails ?? 0,
         ]
       );
       await this.sqliteDb.runAsync('UPDATE children SET stars_count = ? WHERE id = ?', [
@@ -637,7 +722,7 @@ export class LocalAcademyRepository implements AcademyRepository {
     if (this.sqliteDb) {
       await this.sqliteDb.runAsync(
         `UPDATE parent_settings
-         SET pin_hint_shown = ?, daily_goal_minutes = ?, daily_goal_letters = ?, audio_enabled = ?, narration_enabled = ?, sound_effects_volume = ?
+         SET pin_hint_shown = ?, daily_goal_minutes = ?, daily_goal_letters = ?, audio_enabled = ?, narration_enabled = ?, sound_effects_volume = ?, guided_mode = ?, explore_mode = ?
          WHERE id = 1`,
         [
           this.parentSettings.pinHintShown ? 1 : 0,
@@ -646,6 +731,8 @@ export class LocalAcademyRepository implements AcademyRepository {
           this.parentSettings.audioEnabled ? 1 : 0,
           this.parentSettings.narrationEnabled ? 1 : 0,
           this.parentSettings.soundEffectsVolume,
+          this.parentSettings.guidedMode === false ? 0 : 1,
+          this.parentSettings.exploreMode ? 1 : 0,
         ]
       );
     }

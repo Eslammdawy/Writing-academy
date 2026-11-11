@@ -101,3 +101,32 @@ export function verifyParentPin(inputPin: string, storedHash: string): boolean {
 
 export const DEFAULT_PARENT_PIN = '1234';
 export const DEFAULT_PARENT_PIN_HASH = hashParentPin(DEFAULT_PARENT_PIN);
+
+export interface AdultMathChallenge {
+  a: number;
+  b: number;
+  c: number;
+  prompt: string;
+  answer: number;
+}
+
+/**
+ * Generates a randomized adult arithmetic challenge `(A × B) + C` so recovery
+ * cannot be bypassed by memorizing a fixed answer (Fixes P11 / WP7).
+ */
+export function generateAdultMathChallenge(
+  rand: () => number = Math.random
+): AdultMathChallenge {
+  const a = 11 + Math.floor(rand() * 15); // 11..25
+  const b = 3 + Math.floor(rand() * 6); // 3..8
+  const c = 7 + Math.floor(rand() * 23); // 7..29
+  const answer = a * b + c;
+  return {
+    a,
+    b,
+    c,
+    prompt: `(${a} × ${b}) + ${c}`,
+    answer,
+  };
+}
+
