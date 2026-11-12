@@ -42,15 +42,26 @@ Because no physical Android tablet or local Android emulator (`adb`) is attached
 
 ---
 
-## 4. Updated Signed Android APK Build (`Independent Child Mode`)
+## 4. Signed Android APK Builds
+
+### Latest Release: v1.0.1 (`Ready-to-Use Release Build with Trace Freeze Fixes`)
 
 | Property | Value |
 |---|---|
 | **Android Application ID** | `com.soufyandnadine.handwriting` |
+| **Version / VersionCode** | `1.0.1` (`versionCode: 2`) |
 | **EAS Project ID** | `d6e284e5-e6eb-4c17-ab4d-5318ca1997fd` (`@eslammdawys-team/soufy-and-nadine`) |
-| **Latest EAS Build ID** | `ffe169af-827e-4597-ab67-69b008e1e437` (`status: FINISHED`, commit `4a49700`) |
-| **EAS Build Page URL** | https://expo.dev/accounts/eslammdawys-team/projects/soufy-and-nadine/builds/ffe169af-827e-4597-ab67-69b008e1e437 |
-| **Direct Cloud APK URL** | https://expo.dev/artifacts/eas/IKF8U9SJqgOh1l_Or8ZTrEZQsdwQL97Q1KxCcQn13K4.apk |
+| **Latest EAS Build ID** | `6f9a283c-bc40-44bd-819f-473199657c93` (`status: FINISHED`, commit `98beb47`) |
+| **EAS Build Page URL** | https://expo.dev/accounts/eslammdawys-team/projects/soufy-and-nadine/builds/6f9a283c-bc40-44bd-819f-473199657c93 |
+| **Direct Cloud APK URL** | https://expo.dev/artifacts/eas/kHOzckJoSTfZm1EhhSL7gYisx99IeKGlpvvtOoctCdM.apk |
+| **Local APK File Path** | `d:\HPG\Project AI\Writing academy\soufy-and-nadine-v1.0.1.apk` |
+| **APK File Size** | `88.50 MB` (`92,795,019 bytes`) |
+| **APK SHA-256 Checksum** | `4A1A98396A2DCA298770842F7436CDA12787B47E910E8888E997E0053983ED3F` |
+
+### Previous Build Reference: v1.0.0
+
+| Property | Value |
+|---|---|
+| **Version / VersionCode** | `1.0.0` (`versionCode: 1`) |
+| **EAS Build ID** | `ffe169af-827e-4597-ab67-69b008e1e437` (`status: FINISHED`, commit `4a49700`) |
 | **Local APK File Path** | `d:\HPG\Project AI\Writing academy\soufy-and-nadine-v1.0.0.apk` |
-| **APK File Size** | `88.49 MB` (`92,785,103 bytes`) |
-| **APK SHA-256 Checksum** | `76FBD4F37210A8F8C609FC593984556A8FF5CF1DAADE391E7C34C5604B4C5DD0` |
